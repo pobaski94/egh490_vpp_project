@@ -1,0 +1,218 @@
+
+
+
+
+
+
+
+
+
+
+house_3_debug = pd.DataFrame(
+    simulation.house_results_log["House 3"]
+)
+
+debug_columns = [
+    "load_kw",
+    "available_generation_kw",
+    "generation_kw",
+    "potential_net_power_kw",
+    "dynamic_export_limit_kw",
+    "current_export_limit_kw",
+    "shared_pv_export_target_kw",
+    "effective_export_limit_kw",
+    "max_export_limit_kw",
+    "pv_curtailment_kw",
+    "net_power_kw",
+]
+
+print(
+    house_3_debug.loc[11:14, debug_columns].to_string()
+)
+
+
+
+
+
+
+
+
+# # ---------------------------------------------------------
+# # DEBUG VIEW - House 1 connection/export behaviour
+# # ---------------------------------------------------------
+
+# house_1_debug = pd.DataFrame(
+#     simulation.house_results_log["House 1"]
+# )
+
+# debug_columns = [
+#     "available_generation_kw",
+#     "generation_kw",
+#     "battery_discharge_kw",
+#     "potential_net_power_kw",
+#     "current_export_limit_kw",
+#     "max_export_limit_kw",
+#     "pv_curtailment_kw",
+#     "net_power_kw",
+#     "load_kw",
+# ]
+
+# print(
+#     house_1_debug.loc[11:14, debug_columns].to_string()
+# )
+
+# DEBUG VIEW - Sim summary
+
+# simulation_debug = pd.DataFrame(
+#     simulation.simulation_results_summary
+# )
+
+# debug_columns = [
+#     "Shared_PV_available_kw",
+#     "Shared_PV_transferred_kw",
+#     "House_shared_export_targets",
+#     "House_charge_targets",
+#     "VPP_net_power_kw",
+#     "VPP_grid_import_kw",
+#     "VPP_grid_export_kw",
+# ]
+
+# print(
+#     simulation_debug.loc[11:14, debug_columns].to_string()
+# )
+
+
+
+
+
+
+
+
+# for house in simulation.houses:
+#     latest = simulation.house_results_log[house.name][-1]
+
+#     print(
+#         f"{house.name}: "
+#         f"PV={latest['generation_kw']:.2f} kW, "
+#         f"Load={latest['load_kw']:.2f} kW, "
+#         f"Charge={latest['battery_charge_kw']:.2f} kW, "
+#         f"Discharge={latest['battery_discharge_kw']:.2f} kW, "
+#         f"SOC={latest['battery_soc_kwh']:.2f} kWh"
+#     )
+
+# print(
+#     "VPP mode:",
+#     simulation.simulation_results_summary[-1]["VPP_mode"]
+# )
+
+
+
+# # run the sim 10 steps to 10am
+# for _ in range(10):
+#     simulation.step()
+# #check the batteries for relevant states to display    
+# hardware_states = get_hardware_states(simulation)
+# print(hardware_states)
+
+# #run the hardware interface to display the states physically on the LEDs
+# hardware = HardwareInterface()
+
+# try:
+#     hardware.display_states(
+#         hardware_states,
+#         duration=3.0
+#     )
+# finally:
+#     hardware.cleanup()
+
+
+# # battery class testing
+# battery_test = Battery(
+#     capacity_kwh=10,
+#     initial_soc_kwh=5.0,
+#     max_charge_kw=2.0,
+#     max_discharge_kw=2.0,
+#     efficiency=0.95,
+#     min_soc_kwh=1.0
+# )
+
+
+
+# timestep_hours = 1.0
+
+# print(round(battery_test.get_soc_percent(),2),"%")
+# charge_test = battery_test.charge(2.0, timestep_hours)
+# print(round(charge_test,2))
+# print(round(battery_test.get_soc_percent(),2),"%")
+
+
+# discharge_test=battery_test.discharge(4.0, timestep_hours)
+# print(round(discharge_test,2))
+# print(round(battery_test.get_soc_percent(),2),"%")
+
+
+
+
+
+
+# old test codes
+
+# test_days = 5
+# steps_to_run = int((24 / timestep_hours) * test_days)
+
+# for _ in range(steps_to_run):
+#     simulation.step()
+    
+
+
+# profile_index = simulation.current_step % simulation.num_steps
+
+# for house in houses:
+#     state = house.get_state(
+#         profile_index,
+#         timestep_hours
+#     )
+
+#     print(state)
+
+
+    
+# Test external input overide 
+# for _ in range(steps_to_run):
+
+#     if simulation.current_step == 22:
+#         simulation.step({
+#             "manual_mode":"battery_hold"
+#                         })
+#     else:
+#         simulation.step()
+
+# test_result = simulation.simulation_results_summary[22]
+
+# print("Step:", test_result["Simulation_step"])
+# print("Mode:", test_result["VPP_mode"])
+# print("Battery Power:", test_result["Battery_power_kw"])
+# next_result = simulation.simulation_results_summary[23]
+
+# print("Step:", next_result["Simulation_step"])
+# print("Mode:", next_result["VPP_mode"])
+# print("Battery Power:", next_result["Battery_power_kw"])
+
+
+
+
+# for _ in range(steps_to_run):
+
+#     external_inputs = {}
+
+#     if (
+#         event_start_step
+#         <= simulation.current_step
+#         < event_end_step
+#     ):
+#         external_inputs = {
+#             "network_support_request": True,
+#             "requested_support_kw": 8.0
+#         }
+
+#     simulation.step(external_inputs)
