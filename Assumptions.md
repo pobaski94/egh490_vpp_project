@@ -27,9 +27,7 @@ Single-phase and three-phase connection types are retained as model attributes s
 
 For single-phase sites, PV and BESS inverter capacities may each be modelled up to 10 kW, allowing up to 20 kW of cumulative installed inverter capacity.
 Installed inverter capacity does not represent the allowable connection-point export. Actual export is separately constrained by the site's applicable dynamic export limit and modelled maximum connection export capability.
-
 For the three-phase site, a maximum aggregate connection export capability of 30 kW is modelled, based on a simplified 10 kW-per-phase representation.
-
 Explicit per-phase power balance is outside the scope of the current model.
 
 
@@ -37,7 +35,6 @@ Explicit per-phase power balance is outside the scope of the current model.
 **Type:** Model assumption
 
 Dynamic export limits may vary between 1.5 kW per phase and 10 kW per phase under the general model.
-
 Lower limits may be deliberately applied during simulation testing to validate connection-limit, curtailment, and VPP control behaviour.
 
 
@@ -45,7 +42,6 @@ Lower limits may be deliberately applied during simulation testing to validate c
 **Type:** Model architecture
 
 PV inverter rating, BESS inverter rating, and premises connection/export limits are treated as independent constraints.
-
 The capability of a DER therefore does not imply that its full available power can always be imported or exported through the premises connection.
 
 
@@ -53,7 +49,6 @@ The capability of a DER therefore does not imply that its full available power c
 **Type:** Battery model assumption
 
 SigenStor usable battery capacity is modelled across 0-100% simulation SOC based on the manufacturer's specified usable energy and 100% depth-of-discharge capability.
-
 Any minimum SOC reserve imposed by the VPP is treated as a supervisory control strategy rather than a reduction in the modelled physical usable capacity.
 
 
@@ -99,6 +94,94 @@ Curtailed PV is explicitly recorded by the simulation rather than being treated 
 **Type:** Simulation assumption
 
 Normal battery operation uses continuous charge and discharge power ratings rather than short-duration peak ratings because the simulation timestep represents substantially longer operating intervals, typically 30 minutes to one hour.
+
+### A13 - Load and PV Profile Temporal Alignment
+**Type:** 
+
+Household demand profiles and SAM PV generation profiles are derived from different source years. Representative PV periods are therefore aligned with the selected household load periods by calendar season/week rather than by matching historical date and weather conditions. The resulting profiles are intended to provide representative coincident residential demand and solar generation behaviour for the VPP demonstrator, rather than reproduce a specific historical operating period.
+
+### A14 -Baseline PV Weather Selection
+**Type:**
+
+The default VPP simulation uses representative PV generation periods with generally favourable and consistent solar conditions. This provides a stable baseline for evaluating household DER behaviour and VPP control strategies. Periods exhibiting significant weather-related reductions in PV generation may be retained separately for later weather-affected simulation scenarios rather than being used in the baseline case.
+
+### A15 -  PV System Configuration
+**Type:**
+
+The VPP demonstrator uses representative residential PV system capacities rather than modelling specific commercial installations. The following DC nameplate capacities are assumed:
+
+- House 1: 13.3 kWdc
+- House 2: 6.6 kWdc
+- House 3: 13.3 kWdc
+- House 4: 20.0 kWdc
+- House 5: No PV system
+
+House 4 represents a larger three-phase PV installation, while the remaining PV-equipped houses represent single-phase residential installations.
+
+All PV systems are modelled in NREL SAM using the PVWatts model with a common DC/AC ratio of 1.25. This gives representative inverter capacities of approximately 10.64 kWac for the 13.3 kWdc systems, 5.28 kWac for the 6.6 kWdc system, and 16.0 kWac for the 20.0 kWdc three-phase system.
+These inverter capacities are modelling assumptions and are treated separately from the premises connection-point export limits.
+
+### A16 - PV Orientation and System Performance
+**Type:**
+
+All VPP PV systems are modelled as fixed, north-facing rooftop arrays with a 27° tilt. Identical orientation is assumed across participating houses to isolate the effects of PV system capacity, household demand and VPP control behaviour.
+The following common PVWatts assumptions are used:
+
+- Module type: Premium
+- Tracking: Fixed / no tracking
+- Tilt: 27°
+- Azimuth: 0° (North)
+- DC/AC ratio: 1.25
+- Inverter efficiency: 96%
+- Total system losses: 14%
+- Ground coverage ratio (GCR): SAM default
+  
+These parameters provide a consistent representative PV model across all participating houses rather than attempting to reproduce the exact physical characteristics of individual residential installations.
+
+
+### A17 - PV Inverter and Generation Profile Modelling
+**Type:**
+
+PV generation profiles imported into the VPP simulation represent the AC output of the PV inverter rather than raw DC array production.
+PV inverter conversion efficiency, DC/AC sizing and inverter clipping are therefore accounted for within the NREL SAM PVWatts model. These effects are not reapplied to the imported generation profile within the Python VPP simulation.
+PV inverter capacity, battery inverter capacity and premises connection-point export capacity are treated as separate constraints. House 4 is represented using a three-phase PV inverter, while individual phase power flows are not explicitly modelled.
+
+
+### A18 - Simulation Temporal Resolution
+**Type:**
+
+The VPP demonstrator operates using 30-minute timesteps (0.5 h) to align the PV generation profiles with the available residential household demand data.
+Load and PV generation profiles represent average power over each 30-minute interval. Energy quantities are determined using the corresponding 0.5-hour simulation timestep.
+
+
+### A1 -
+**Type:**
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
