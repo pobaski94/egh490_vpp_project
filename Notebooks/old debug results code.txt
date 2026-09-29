@@ -1,5 +1,38 @@
 
 
+  def get_export_headroom_kw(
+            self,
+            load_kw,
+            generation_kw
+    ):
+        """
+        Calculate how much additional battery discharge can occur
+        without exceeding the current connection export limit.
+    
+        Positive net power = grid import.
+        Negative net power = grid export.
+        """
+    
+        net_before_battery_kw = (
+            load_kw - generation_kw
+        )
+    
+        export_before_battery_kw = max(
+            -net_before_battery_kw,
+            0.0
+        )
+    
+        export_headroom_kw = max(
+            self.current_export_limit_kw
+            - export_before_battery_kw,
+            0.0
+        )
+    
+        return export_headroom_kw
+
+
+
+
 
 
 

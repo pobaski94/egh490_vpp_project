@@ -107,3 +107,35 @@ Potential performance measures include:
 
 The preferred hierarchy should not be assumed in advance. It should
 be evaluated using the simulation and later economic model.
+
+
+
+## R09 - 2025 QLD High-Price Market Opportunities
+
+Analysis of the complete 2025 AEMO QLD1 five-minute dataset identified limited but significant periods of high wholesale electricity prices:
+
+≥ $500/MWh: 18.50 hours/year
+≥ $1,000/MWh: 12.33 hours/year
+≥ $2,000/MWh: 7.58 hours/year
+Approximately 95% of ≥$1,000/MWh intervals occurred between 4–9 PM.
+≥$1,000/MWh conditions occurred across only 22 days, indicating that high-value periods are rare and concentrated.
+
+Research avenue: Investigate how much energy the five-house VPP could realistically make available during these historical high-price periods, considering battery SOC, PV availability, household demand, inverter limits, and dynamic connection constraints. This could quantify the economic value of coordinated VPP dispatch during high-value market conditions.
+
+Note: These price thresholds currently represent research-defined market conditions, not confirmed VPP activation thresholds. AEMO VPP research should be reviewed before defining the controller's event methodology.
+
+## R10 — Overview of Australian VPP Operation
+
+Australian residential VPP offerings generally coordinate distributed solar PV and battery systems so that household DER can provide value beyond individual self-consumption. The reviewed commercial offerings show that there is no single standard Australian VPP operating model.
+
+Common characteristics identified across current offerings include:
+
+Central battery control: VPP operators may remotely charge, discharge or hold participating batteries during selected operating periods or events.
+Customer SOC reserves: Several providers maintain homeowner-selected or predefined battery reserves, commonly around 10–20%, preserving backup/customer energy while allowing VPP participation.
+Normal energy operation: Outside VPP events, customers continue to import/export electricity under their applicable retail tariff and feed-in tariff.
+Event-based incentives: Several offerings provide additional compensation for battery energy supplied during designated VPP events, with examples in the reviewed market offering approximately $1/kWh for eligible event energy.
+Time-dependent incentives: Some offerings provide increased export value during particular peak periods, creating an incentive to preserve battery energy for later export.
+Grid charging: Some programs allow or incentivise batteries to charge from the grid, meaning VPP optimisation is not necessarily restricted to storing excess rooftop PV.
+Different commercial structures: Australian VPPs use combinations of fixed participation credits, event payments, enhanced feed-in tariffs, wholesale-price exposure and energy-plan benefits.
+
+Project relevance: The demonstrator should therefore represent the VPP as a coordinator of flexible residential DER rather than a single fixed operating strategy. A representative model can combine normal household operation, economic battery dispatch, an SOC reserve, dynamic connection constraints, and externally initiated support events. This provides a basis for investigating whether coordinated operation improves the economic performance of the five participating prosumers.

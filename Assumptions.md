@@ -154,8 +154,106 @@ The VPP demonstrator operates using 30-minute timesteps (0.5 h) to align the PV 
 Load and PV generation profiles represent average power over each 30-minute interval. Energy quantities are determined using the corresponding 0.5-hour simulation timestep.
 
 
-### A1 -
-**Type:**
+### A19 — Representative VPP Economic Model
+
+The demonstrator does not reproduce a specific Australian retail VPP
+product. Economic assumptions are instead informed by common features
+observed across current Australian VPP offerings.
+
+The model distinguishes between:
+
+- normal retail electricity import costs,
+- normal grid-export / feed-in revenue, and
+- additional VPP-event incentives where applicable.
+
+Fixed sign-up credits, hardware subsidies and contract incentives are
+excluded from dispatch optimisation because they do not directly affect
+the marginal value of battery dispatch at each simulation timestep.
+
+
+### A20 — VPP Battery Reserve
+
+A nominal minimum VPP-controlled battery SOC reserve of 20% is assumed.
+
+The reserve represents energy retained for the residential participant
+and is a controller-level operating constraint rather than a reduction
+in physical battery usable capacity.
+
+The physical battery model therefore continues to represent the full
+manufacturer usable-energy range from 0–100% simulation SOC.
+
+The 20% nominal reserve is informed by current Australian VPP offerings,
+several of which use approximately 20% minimum customer reserves,
+although actual commercial products vary.
+
+
+### A21 — Central Battery Dispatch
+
+The VPP supervisory controller may issue battery charge, discharge or
+hold targets to participating battery systems.
+
+Requested dispatch remains subject to:
+
+- battery SOC limits,
+- VPP SOC reserve,
+- continuous battery power limits,
+- BESS inverter limits,
+- premises connection constraints, and
+- applicable dynamic import/export constraints.
+
+This represents aggregator-style supervisory control rather than direct
+unconstrained manipulation of battery state.
+
+
+### A22 — Grid Charging
+
+Participating batteries may charge from the grid where permitted by the
+active VPP strategy and where economically or operationally justified.
+
+Grid charging is not assumed to occur continuously and remains subject
+to battery, inverter and connection constraints.
+
+
+### A23 — VPP Event Compensation
+
+Explicit VPP dispatch events may be assigned an additional energy value
+separate from ordinary retail import and feed-in tariffs.
+
+The demonstrator does not assume that one event-payment rate represents
+all Australian VPPs. Event compensation will instead be treated as a
+scenario parameter informed by the range of mechanisms observed in
+current Australian VPP offerings.
+
+
+### A24 — Aggregate Economic Objective
+
+The primary economic objective is the combined variable electricity
+cost of the five participating residential premises.
+
+Individual participant costs and benefits will also be recorded to
+identify whether aggregate VPP optimisation produces unequal outcomes
+between participants.
+
+Participant-to-participant financial settlement is outside the initial
+scope of the demonstrator.
+
+
+### A25 — Economic Dispatch Scope
+
+Economic battery dispatch may consider:
+
+- avoided grid-import cost,
+- ordinary grid-export revenue,
+- VPP-event revenue,
+- available PV generation,
+- battery SOC and available capacity,
+- battery efficiency,
+- residential demand, and
+- dynamic connection constraints.
+
+Fixed participation payments, equipment subsidies, contract fees and
+hardware purchase costs are excluded from short-term battery dispatch
+decisions.
 
 
 
