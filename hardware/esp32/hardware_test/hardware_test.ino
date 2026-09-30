@@ -13,18 +13,18 @@ void setup() {
 }
 
 void loop() {
-    // Red
-    Serial.println("RED");
+    // Green
+    Serial.println("CHANNEL 1");
     rgbLedWrite(RGB_LED_PIN, 255, 0, 0);
-    delay(1000);
+    delay(2000);
 
     // Green
-    Serial.println("GREEN");
+    Serial.println("CHANNEL 2");
     rgbLedWrite(RGB_LED_PIN, 0, 255, 0);
-    delay(1000);
+    delay(2000);
 
     // Blue
-    Serial.println("BLUE");
+    Serial.println("CHANNEL 3");
     rgbLedWrite(RGB_LED_PIN, 0, 0, 255);
-    delay(1000);
+    delay(2000);
 }
