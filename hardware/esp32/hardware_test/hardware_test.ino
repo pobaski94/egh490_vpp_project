@@ -1,6 +1,6 @@
 #include <Arduino.h>
 
-#define RGB_LED_PIN 21
+#define RGB_LED_PIN 2
 
 void setup() {
     Serial.begin(115200);
@@ -14,17 +14,24 @@ void setup() {
 
 void loop() {
     // Green
-    Serial.println("CHANNEL 1");
-    rgbLedWrite(RGB_LED_PIN, 255, 0, 0);
-    delay(2000);
+    //Serial.println("CHANNEL 1");
+    //rgbLedWrite(RGB_LED_PIN, 255, 0, 0);
+    //delay(2000);
 
-    // Green
-    Serial.println("CHANNEL 2");
-    rgbLedWrite(RGB_LED_PIN, 0, 255, 0);
-    delay(2000);
+    // red
+    //Serial.println("CHANNEL 2");
+    //rgbLedWrite(RGB_LED_PIN, 0, 255, 0);
+    //delay(2000);
 
     // Blue
-    Serial.println("CHANNEL 3");
-    rgbLedWrite(RGB_LED_PIN, 0, 0, 255);
-    delay(2000);
+    //Serial.println("CHANNEL 3");
+    //rgbLedWrite(RGB_LED_PIN, 0, 0, 255);
+    //delay(2000);
+
+    // Full White
+    Serial.println("FULL WHITE");
+    rgbLedWrite(RGB_LED_PIN, 255, 255, 255);
+    //delay(2000);
+
 }
+

@@ -106,7 +106,7 @@ class HardwareInterface:
         for pin in self.HOUSE_PINS.values():
             GPIO.output(pin, GPIO.LOW)
     
-    def update_outputs(self, result):
+    def update_outputs(self, result, house_states):
         """
         Update the outputs for the ESP32S3 for one simulation step
         """
@@ -117,6 +117,21 @@ class HardwareInterface:
 
         else:
             self.serial.write(b"LED,OFF\n")
+
+        # -------------------------------------------
+        # HOUSE BATTERY INDICATORS
+        # -------------------------------------------
+
+        for house, state in house_states.items():
+
+            house_number = int(house.split()[-1])
+
+            command = (
+                f"HOUSE,{house_number},{state.upper()}\n"
+            )
+
+            self.serial.write(command.encode())
+            
             
             
         
