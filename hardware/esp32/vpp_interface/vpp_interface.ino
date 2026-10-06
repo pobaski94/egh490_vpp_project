@@ -7,7 +7,7 @@
 #define BUTTON_PIN 1
 
 #define SOC_LED_PIN 13
-#define SOC_LED_COUNT 4
+#define SOC_LED_COUNT 20
 
 // set up battery SOC LEDS
 Adafruit_NeoPixel socLeds(
@@ -62,10 +62,48 @@ void setHouseState(int house, String state) {
     }
 
     houseLeds.show();
-    
-    
-
 }
+
+void setSocBar(int house, int socPercent) {
+
+    int ledsOn = 0;
+    int startPixel = (house - 1) * 4;
+    
+    if (socPercent <=0) {
+        ledsOn = 0;
+    }
+
+    else if (socPercent <= 25) {
+        ledsOn = 1;
+    }
+        
+    else if (socPercent <= 50) {
+        ledsOn = 2;
+    }
+    else if (socPercent <= 75) {
+        ledsOn = 3;
+    }
+    else {
+        ledsOn = 4;
+    }
+
+    for (int j = 0; j < 4; j++) {
+        socLeds.setPixelColor(
+            startPixel + j,
+            socLeds.Color(0,0,0)
+            );
+    }
+
+    for (int i = 0; i < ledsOn; i++) {
+        socLeds.setPixelColor(
+            startPixel + i,
+            socLeds.Color(100, 100, 100)
+        );
+    }
+
+    socLeds.show();
+}
+
 
 
 
@@ -173,6 +211,7 @@ bool rawButtonState = digitalRead(BUTTON_PIN);
 
 
         else if (command == "SOC,TEST") {
+            
 
             socLeds.clear();
             socLeds.setPixelColor(0, socLeds.Color(255,0,0));
@@ -184,8 +223,94 @@ bool rawButtonState = digitalRead(BUTTON_PIN);
 
             Serial.println("OK,SOC,TEST");
         }
-            
 
+        else if (command.startsWith("SOC,1,")) {
+            
+            
+            int secondComma = command.indexOf(',', 4);
+
+            int socPercent = command.substring(
+                secondComma + 1
+            ).toInt();
+        
+            setSocBar(1, socPercent);
+        
+            Serial.print("OK,SOC,1,");
+            Serial.println(socPercent);
+        }
+        else if (command.startsWith("SOC,2,")) {
+            
+            
+            int secondComma = command.indexOf(',', 4);
+
+            int socPercent = command.substring(
+                secondComma + 1
+            ).toInt();
+        
+            setSocBar(2, socPercent);
+        
+            Serial.print("OK,SOC,2,");
+            Serial.println(socPercent);
+        }
+        else if (command.startsWith("SOC,3,")) {
+            
+            
+            int secondComma = command.indexOf(',', 4);
+
+            int socPercent = command.substring(
+                secondComma + 1
+            ).toInt();
+        
+            setSocBar(3, socPercent);
+        
+            Serial.print("OK,SOC,3,");
+            Serial.println(socPercent);
+        }
+            
+        else if (command.startsWith("SOC,4,")) {
+            
+            
+            int secondComma = command.indexOf(',', 4);
+
+            int socPercent = command.substring(
+                secondComma + 1
+            ).toInt();
+        
+            setSocBar(4, socPercent);
+        
+            Serial.print("OK,SOC,4,");
+            Serial.println(socPercent);
+        }
+            
+        else if (command.startsWith("SOC,5,")) {
+            
+            
+            int secondComma = command.indexOf(',', 4);
+
+            int socPercent = command.substring(
+                secondComma + 1
+            ).toInt();
+        
+            setSocBar(5, socPercent);
+        
+            Serial.print("OK,SOC,5,");
+            Serial.println(5, socPercent);
+        }
+
+        else if (command == "LEDS,OFF") {
+            
+            socLeds.clear();
+            houseLeds.clear();
+            socLeds.show();
+            houseLeds.show();
+            setLed(0,0,0);
+                        
+    
+            Serial.println("OK,LEDS,OFF");
+        
+        }
+
+        
         else {
             Serial.print("ERROR,UNKNOWN_COMMAND,");
             Serial.println(command);
