@@ -1,16 +1,47 @@
 import time
 import serial
-import Jetson.GPIO as GPIO
+from serial.tools import list_ports
+
+
+def find_esp32_port():
+
+    ports = list_ports.comports()
+
+    for port in ports:
+
+        description = (
+            f"{port.description} "
+            f"{port.manufacturer} "
+            f"{port.product}"
+        ).lower()
+
+        if (
+            port.vid == 0x303A
+            or "esp32" in description
+            or "espressif" in description
+            or "usb jtag" in description
+        ):
+            return port.device
+
+    raise RuntimeError("ESP32 serial device not found")
+
 
 
 class HardwareInterface:
 
     def __init__(self):
+       
         # -----------------------------
         # ESP32 USB serial connection
         # -----------------------------
+
+        
+        esp32_port = find_esp32_port()
+        
+        print(f"Using ESP32 serial port: {esp32_port}")
+        
         self.serial = serial.Serial(
-            "/dev/ttyACM0",
+            esp32_port,
             115200,
             timeout=0.1
         )
