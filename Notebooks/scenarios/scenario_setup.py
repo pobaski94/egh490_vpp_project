@@ -6,7 +6,7 @@
 # Builds the coordinated VPP demonstration scenario from
 # pre-processed household load/PV profiles.
 # ============================================================
-
+import numpy as np
 
 from models.residential import House, Battery
 from models.external import LocalLoad, WindTurbine
@@ -60,60 +60,39 @@ def create_sigenstor_spec(
         "module_count": module_count,
     }
 
-
-# ============================================================
-# COORDINATED VPP SCENARIO
-# ============================================================
-
-def create_coordinated_vpp_scenario(
+def create_houses(
     house_loads,
     house_pv,
-    dynamic_export_profile_kw_per_phase,
-    hospital_load_profile,
-    wind_generation_profile,
-    timestep_hours,
     num_steps,
-    tariff=BATTERY_STARTER
+    dynamic_export_profile_kw_per_phase=None,
+    fixed_export_limit_kw_per_phase=None
 ):
-
-    controller = VPPController(
-        default_mode="self_consumption",
-        peak_hours=[
-            16.0, 16.5,
-            17.0, 17.5,
-            18.0, 18.5,
-            19.0, 19.5,
-            20.0, 20.5,
-        ],
-        cheap_energy_hours=[]
-    )
+    if (
+        dynamic_export_profile_kw_per_phase is not None
+        and fixed_export_limit_kw_per_phase is not None
+    ):
+        raise ValueError(
+            "Use either a dynamic export profile "
+            "or a fixed export limit, not both."
+        )
 
     house1_battery = Battery(
-        **create_sigenstor_spec(
-            module_count=3
-        )
+        **create_sigenstor_spec(module_count=3)
     )
 
     house2_battery = Battery(
-        **create_sigenstor_spec(
-            module_count=2
-        )
+        **create_sigenstor_spec(module_count=2)
     )
 
     house4_battery = Battery(
-        **create_sigenstor_spec(
-            module_count=3
-        )
+        **create_sigenstor_spec(module_count=3)
     )
 
     house5_battery = Battery(
-        **create_sigenstor_spec(
-            module_count=5
-        )
+        **create_sigenstor_spec(module_count=5)
     )
 
     houses = [
-
         House(
             name="House 1",
             load_profile=house_loads["House 1"],
@@ -184,6 +163,59 @@ def create_coordinated_vpp_scenario(
             )
         ),
     ]
+    
+    if fixed_export_limit_kw_per_phase is not None:
+    
+        fixed_profile = np.full(
+            num_steps,
+            fixed_export_limit_kw_per_phase
+        )
+    
+        for house in houses:
+            house.dynamic_export_profile_kw_per_phase = (
+                fixed_profile
+            )
+    return houses
+
+
+
+    
+# ============================================================
+# COORDINATED VPP SCENARIO
+# ============================================================
+
+def create_coordinated_vpp_scenario(
+    house_loads,
+    house_pv,
+    dynamic_export_profile_kw_per_phase,
+    hospital_load_profile,
+    wind_generation_profile,
+    timestep_hours,
+    num_steps,
+    tariff=BATTERY_STARTER
+):
+
+    controller = VPPController(
+        default_mode="self_consumption",
+        peak_hours=[
+            16.0, 16.5,
+            17.0, 17.5,
+            18.0, 18.5,
+            19.0, 19.5,
+            20.0, 20.5,
+        ],
+        cheap_energy_hours=[],
+        economic_export_reserve_percent=30
+    )
+
+    houses = create_houses(
+        house_loads=house_loads,
+        house_pv=house_pv,
+        num_steps=num_steps,
+        dynamic_export_profile_kw_per_phase=(
+            dynamic_export_profile_kw_per_phase
+        )
+    )
 
     hospital = LocalLoad(
         "Hospital",
@@ -210,3 +242,126 @@ def create_coordinated_vpp_scenario(
     )
 
     return simulation
+
+def create_independent_dynamic_scenario(
+    house_loads,
+    house_pv,
+    dynamic_export_profile_kw_per_phase,
+    hospital_load_profile,
+    wind_generation_profile,
+    timestep_hours,
+    num_steps,
+    tariff
+):
+
+    houses = create_houses(
+        house_loads=house_loads,
+        house_pv=house_pv,
+        num_steps=num_steps,
+        dynamic_export_profile_kw_per_phase=(
+            dynamic_export_profile_kw_per_phase
+        )
+    )
+
+    controller = VPPController(
+        default_mode="self_consumption",
+        peak_hours=[
+            16.0, 16.5,
+            17.0, 17.5,
+            18.0, 18.5,
+            19.0, 19.5,
+            20.0, 20.5,
+        ],
+        cheap_energy_hours=[],
+        economic_export_reserve_percent=30
+    )
+
+    hospital = LocalLoad(
+        "Hospital",
+        hospital_load_profile
+    )
+
+    wind = WindTurbine(
+        "DFIG Wind Placeholder",
+        wind_generation_profile
+    )
+
+    financial_model = FinancialModel(
+        tariff=tariff
+    )
+
+    simulation = VPPSimulation(
+        houses=houses,
+        hospital=hospital,
+        wind=wind,
+        controller=controller,
+        timestep_hours=timestep_hours,
+        financial_model=financial_model,
+        num_steps=num_steps
+    )
+
+    return simulation
+    
+def create_independent_fixed_scenario(
+    house_loads,
+    house_pv,
+    hospital_load_profile,
+    wind_generation_profile,
+    timestep_hours,
+    num_steps,
+    tariff,
+    fixed_export_limit_kw_per_phase=5.0
+):
+
+    houses = create_houses(
+        house_loads=house_loads,
+        house_pv=house_pv,
+        num_steps=num_steps,
+        fixed_export_limit_kw_per_phase=(
+            fixed_export_limit_kw_per_phase
+        )
+    )
+
+    controller = VPPController(
+        default_mode="self_consumption",
+        peak_hours=[
+            16.0, 16.5,
+            17.0, 17.5,
+            18.0, 18.5,
+            19.0, 19.5,
+            20.0, 20.5,
+        ],
+        cheap_energy_hours=[],
+        economic_export_reserve_percent=30
+    )
+
+
+    hospital = LocalLoad(
+        "Hospital",
+        hospital_load_profile
+    )
+    
+    wind = WindTurbine(
+        "DFIG Wind Placeholder",
+        wind_generation_profile
+    )
+    
+    financial_model = FinancialModel(
+        tariff=tariff
+    )
+    
+
+    simulation = VPPSimulation(
+        houses=houses,
+        hospital=hospital,
+        wind=wind,
+        controller=controller,
+        timestep_hours=timestep_hours,
+        financial_model=financial_model,
+        num_steps=num_steps
+    )
+
+    
+
+    return simulation
+    

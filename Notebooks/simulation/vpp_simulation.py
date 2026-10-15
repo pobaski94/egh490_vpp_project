@@ -176,6 +176,21 @@ class VPPSimulation:
             for house in self.houses
         ]
 
+        total_shared_pv_received_kw = sum(
+            result["shared_pv_received_kw"]
+            for result in house_results
+        )
+
+        total_shared_pv_supplied_kw = sum(
+            result["shared_pv_supplied_kw"]
+            for result in house_results
+        )
+        
+        shared_pv_balance_error_kw = (
+            total_shared_pv_supplied_kw - total_shared_pv_received_kw
+        )
+        
+
         # --------------------------------------------------------
         # SIMULATION TIME
         # --------------------------------------------------------
@@ -408,6 +423,15 @@ class VPPSimulation:
                     "vpp_tariff_event",
                     False
                 ),
+
+            "Shared_PV_received_kw":
+                total_shared_pv_received_kw,
+            
+            "Shared_PV_supplied_kw":
+                total_shared_pv_supplied_kw,
+            
+            "Shared_PV_balance_error_kw":
+                shared_pv_balance_error_kw,
             
             # VPP financial accounting
             "VPP_import_energy_kwh":

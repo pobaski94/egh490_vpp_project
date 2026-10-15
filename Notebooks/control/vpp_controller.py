@@ -35,7 +35,8 @@ class VPPController:
         default_mode="self_consumption",
         peak_hours=None,
         cheap_energy_hours=None,
-        grid_import_limit_kw=None
+        grid_import_limit_kw=None,
+        economic_export_reserve_percent=0
     ):
 
         # Normal operating mode when no higher-priority
@@ -56,6 +57,10 @@ class VPPController:
         # If exceeded, the controller can activate peak shaving.
         self.grid_import_limit_kw = (
             grid_import_limit_kw
+        )
+
+        self.economic_export_reserve_percent = (
+            economic_export_reserve_percent
         )
         
     def get_signals(
@@ -331,10 +336,8 @@ class VPPController:
         # PRIORITY 5 - SCHEDULED PEAK SHAVING
         # ----------------------------------------------------
 
-        elif (
-            peak_shaving_enabled
-            and t in self.peak_hours
-        ):
+        elif peak_shaving_enabled:
+           
             active_mode = "peak_shaving"
 
 
@@ -381,7 +384,7 @@ class VPPController:
                 and t in self.peak_hours
             )
         )
-        
+            
         if (
             shared_pv_transfer_allowed
             and total_shared_pv_available_kw > 0
@@ -545,6 +548,8 @@ class VPPController:
                 pv_sharing_enabled,
             "economic_export_enabled":
                 economic_export_enabled,
+            "economic_export_reserve_percent":
+                self.economic_export_reserve_percent,
 
             # Network-support event state.
             "is_event_period":

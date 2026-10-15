@@ -512,8 +512,16 @@ class House:
 
         # The controller may allocate genuine surplus PV from this
         # house to other participating VPP houses.
-        shared_pv_export_target_kw = signals[
+        shared_pv_supplied_kw = signals[
             "house_shared_export_targets"
+        ].get(
+            self.name,
+            0.0
+        )
+
+        # PV allocated to this house from another VPP participant.
+        shared_pv_received_kw = signals[
+            "house_shared_pv_targets"
         ].get(
             self.name,
             0.0
@@ -533,7 +541,7 @@ class House:
         effective_export_limit_kw = min(
             max(
                 current_export_limit_kw,
-                shared_pv_export_target_kw
+                shared_pv_supplied_kw
             ),
             self.max_export_limit_kw
         )
@@ -582,6 +590,8 @@ class House:
         # display.
         battery_soc_kwh = 0.0
         battery_soc_percent = 0.0
+
+        economic_export_reserve_percent = 0.0
         
         
         # ----------------------------------------------------
@@ -594,6 +604,11 @@ class House:
             # Read the supervisory operating mode and supporting
             # controller flags for this timestep.
             mode = signals["mode"]
+
+            economic_export_reserve_percent = signals.get(
+                "economic_export_reserve_percent",
+                0.0
+            )
 
             is_peak_period = (
                 signals["is_peak_period"]
@@ -613,17 +628,7 @@ class House:
             # ------------------------------------------------
             # RECEIVED SHARED PV
             # ------------------------------------------------
-
-            # Shared PV allocated to this house can first offset
-            # its remaining household demand and can then create
-            # surplus power available for battery charging.
-            shared_pv_allocation_kw = signals[
-                "house_shared_pv_targets"
-            ].get(
-                self.name,
-                0.0
-            )
-
+           
             # Virtual net power used for battery dispatch after
             # accounting for the VPP-directed shared-PV allocation.
             #
@@ -631,7 +636,7 @@ class House:
             # calculated separately later in this method.
             effective_net_power_kw = (
                 net_power_kw_bb
-                - shared_pv_allocation_kw
+                - shared_pv_received_kw
             )
 
 
@@ -740,8 +745,41 @@ class House:
                 #
                 # The Battery object subsequently enforces its
                 # own physical power and stored-energy limits.
-                battery_power_kw = self.battery.discharge(
+                # ----------------------------------------------
+                # ECONOMIC EXPORT SOC RESERVE
+                # ----------------------------------------------
+                
+                # Strategic reserve retained for later household use.
+                reserve_soc_kwh = (
+                    self.battery.capacity_kwh
+                    * economic_export_reserve_percent
+                    / 100.0
+                )
+                
+                # Only energy above the strategic reserve may be
+                # deliberately exported.
+                available_energy_above_reserve_kwh = max(
+                    self.battery.soc_kwh
+                    - reserve_soc_kwh,
+                    0.0
+                )
+                # Maximum electrical discharge that can be sustained
+                # for this timestep without crossing the reserve.
+                reserve_limited_discharge_kw = min(
+                    self.battery.max_discharge_kw,
+                    available_energy_above_reserve_kwh
+                    * self.battery.efficiency
+                    / timestep_hours
+                )
+                # Respect both the connection constraint and the
+                # economic-export reserve.                
+                requested_discharge_kw = min(
                     maximum_connection_permitted_discharge_kw,
+                    reserve_limited_discharge_kw
+                )
+                
+                battery_power_kw = self.battery.discharge(
+                    requested_discharge_kw,
                     timestep_hours
                 )
                     
@@ -949,12 +987,54 @@ class House:
         # premises, while this value represents the physical
         # meter flow at this individual connection point.
 
-        final_net_power_kw = (
+        physical_net_power_kw = (
             load_kw
             - actual_generation_kw
             - battery_power_kw
         )
+
+        physical_grid_import_kw = max(
+            physical_net_power_kw,
+            0.0
+        )
+
+        physical_grid_export_kw = max(
+            -physical_net_power_kw,
+            0.0
+        )
+
+        external_grid_import_kw = max(
+            physical_grid_import_kw - shared_pv_received_kw,
+            0.0
+        )
+
+        external_grid_export_kw = max(
+            physical_grid_export_kw - shared_pv_supplied_kw,
+            0.0
+        )
+
+        external_grid_net_power_kw = (
+            external_grid_import_kw - external_grid_export_kw
+        )
+
+
+        shared_pv_received_kwh = (
+            shared_pv_received_kw * timestep_hours
+        )
+
+        shared_pv_supplied_kwh = (
+            shared_pv_supplied_kw * timestep_hours
+        )
+
+        external_grid_import_kwh = (
+            external_grid_import_kw * timestep_hours
+        )
+
+        external_grid_export_kwh = (
+            external_grid_export_kw * timestep_hours
+        )
         
+        final_net_power_kw = physical_net_power_kw
         # ----------------------------------------------------
         # BATTERY CONFIGURATION METADATA
         # ----------------------------------------------------
@@ -1048,6 +1128,7 @@ class House:
             "battery_max_discharge_kw":
                 battery_max_discharge_kw,
 
+
             # ------------------------------------------------
             # Household demand and PV generation
             # ------------------------------------------------
@@ -1081,8 +1162,6 @@ class House:
 
             # A09 shared-PV export allocation for this source
             # premises and the resulting effective export limit.
-            "shared_pv_export_target_kw":
-                shared_pv_export_target_kw,
 
             "effective_export_limit_kw":
                 effective_export_limit_kw,
@@ -1111,6 +1190,17 @@ class House:
                 battery_soc_kwh,
             "battery_soc_percent":
                 battery_soc_percent,
+            
+            "economic_export_reserve_percent":
+                economic_export_reserve_percent,
+            "economic_export_reserve_kwh":
+                (
+                    self.battery.capacity_kwh
+                    * economic_export_reserve_percent
+                    / 100.0
+                    if self.battery is not None
+                    else 0.0
+                ),
 
             # Final physical premises grid exchange:
             #   positive = grid import
@@ -1124,6 +1214,50 @@ class House:
                 battery_charge_kw,
             "battery_discharge_kw":
                 battery_discharge_kw,
+
+            # ------------------------------------------------
+            # Shared PV accounting
+            # ------------------------------------------------
+            
+            "shared_pv_received_kw":
+                shared_pv_received_kw,
+            
+            "shared_pv_supplied_kw":
+                shared_pv_supplied_kw,
+            
+            "shared_pv_received_kwh":
+                shared_pv_received_kwh,
+            
+            "shared_pv_supplied_kwh":
+                shared_pv_supplied_kwh,
+            
+            # ------------------------------------------------
+            # Physical vs external grid exchange
+            # ------------------------------------------------
+            
+            "physical_net_power_kw":
+                physical_net_power_kw,
+            
+            "physical_grid_import_kw":
+                physical_grid_import_kw,
+            
+            "physical_grid_export_kw":
+                physical_grid_export_kw,
+            
+            "external_grid_import_kw":
+                external_grid_import_kw,
+            
+            "external_grid_export_kw":
+                external_grid_export_kw,
+            
+            "external_grid_net_power_kw":
+                external_grid_net_power_kw,
+            
+            "external_grid_import_kwh":
+                external_grid_import_kwh,
+            
+            "external_grid_export_kwh":
+                external_grid_export_kwh,
         }
 
         

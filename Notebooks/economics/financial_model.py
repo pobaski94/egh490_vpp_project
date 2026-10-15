@@ -4,9 +4,20 @@ class FinancialModel:
 
     def __init__(
         self,
-        tariff
+        tariff,
+        shared_pv_purchase_rate=0.0,
+        shared_pv_supplier_rate=0.0
     ):
         self.tariff = tariff
+        
+        self.shared_pv_purchase_rate = (
+            shared_pv_purchase_rate
+        )
+
+        self.shared_pv_supplier_rate = (
+            shared_pv_supplier_rate
+        )
+
 
         # Daily counters required by tariffs such as
         # Origin Battery Charge
@@ -20,6 +31,8 @@ class FinancialModel:
         self.vpp_totals = {
             "cumulative_import_cost": 0.0,
             "cumulative_export_revenue": 0.0,
+            "cumulative_shared_pv_cost": 0.0,
+            "cumulative_shared_pv_revenue": 0.0,
             "cumulative_net_cost": 0.0,
         }
 
@@ -83,71 +96,92 @@ class FinancialModel:
         
     def calculate_timestep_cost(
         self,
-        net_power_kw,
-        timestep_hours,
+        external_grid_import_kwh,
+        external_grid_export_kwh,
+        shared_pv_received_kwh,
+        shared_pv_supplied_kwh,
         hour_of_day,
         day_number,
         vpp_event=False
     ):
-
-        # NOTE current house sign convention for net_power is:
-        # positive net_power_kw -> grid import
-        # negative net_power_kw -> grid export
-
-        import_power_kw = max(net_power_kw, 0.0)
-        export_power_kw = max(-net_power_kw, 0.0)
-
-        # Convert power to energy using the sim timestep
-        import_energy_kwh = import_power_kw * timestep_hours
-        export_energy_kwh = export_power_kw * timestep_hours
-
-
+    
         import_rate = self.get_import_rate(
             hour_of_day
         )
-        
+    
         export_rate = self.get_export_rate(
             hour_of_day,
             vpp_event
         )
-        
-        # Calculate the revenue and cost for the timestep and the net cost
+    
+        # External grid settlement
         import_cost = (
-            import_energy_kwh
+            external_grid_import_kwh
             * import_rate
         )
-        
+    
         export_revenue = (
-            export_energy_kwh
+            external_grid_export_kwh
             * export_rate
         )
-        
+    
+        # Internal VPP PV-sharing settlement
+        shared_pv_cost = (
+            shared_pv_received_kwh
+            * self.shared_pv_purchase_rate
+        )
+    
+        shared_pv_revenue = (
+            shared_pv_supplied_kwh
+            * self.shared_pv_supplier_rate
+        )
+    
         net_cost = (
             import_cost
+            + shared_pv_cost
             - export_revenue
+            - shared_pv_revenue
         )
-
+    
         return {
             "import_energy_kwh":
-                import_energy_kwh,
-        
+                external_grid_import_kwh,
+    
             "export_energy_kwh":
-                export_energy_kwh,
-        
+                external_grid_export_kwh,
+    
+            "shared_pv_received_kwh":
+                shared_pv_received_kwh,
+    
+            "shared_pv_supplied_kwh":
+                shared_pv_supplied_kwh,
+    
             "import_rate":
                 import_rate,
-        
+    
             "export_rate":
                 export_rate,
-        
+    
+            "shared_pv_purchase_rate":
+                self.shared_pv_purchase_rate,
+    
+            "shared_pv_supplier_rate":
+                self.shared_pv_supplier_rate,
+    
             "import_cost":
                 import_cost,
-        
+    
             "export_revenue":
                 export_revenue,
-        
+    
+            "shared_pv_cost":
+                shared_pv_cost,
+    
+            "shared_pv_revenue":
+                shared_pv_revenue,
+    
             "net_cost":
-                net_cost
+                net_cost,
         }
 
         
@@ -165,8 +199,16 @@ class FinancialModel:
         vpp_financials = {
             "import_energy_kwh": 0.0,
             "export_energy_kwh": 0.0,
+        
+            "shared_pv_received_kwh": 0.0,
+            "shared_pv_supplied_kwh": 0.0,
+        
             "import_cost": 0.0,
             "export_revenue": 0.0,
+        
+            "shared_pv_cost": 0.0,
+            "shared_pv_revenue": 0.0,
+        
             "net_cost": 0.0
         }
     
@@ -174,33 +216,63 @@ class FinancialModel:
     
             house_name = result["name"]
     
-            house_financials = (
-                self.calculate_timestep_cost(
-                    result["net_power_kw"],
-                    timestep_hours,
-                    hour_of_day,
-                    day_number,
-                    vpp_event
-                )
+            house_financials = self.calculate_timestep_cost(
+                external_grid_import_kwh=(
+                    result["external_grid_import_kwh"]
+                ),
+                external_grid_export_kwh=(
+                    result["external_grid_export_kwh"]
+                ),
+                shared_pv_received_kwh=(
+                    result["shared_pv_received_kwh"]
+                ),
+                shared_pv_supplied_kwh=(
+                    result["shared_pv_supplied_kwh"]
+                ),
+                hour_of_day=hour_of_day,
+                day_number=day_number,
+                vpp_event=vpp_event
             )
 
             if house_name not in self.house_totals:
                 self.house_totals[house_name] = {
                     "cumulative_import_cost": 0.0,
                     "cumulative_export_revenue": 0.0,
+                            "cumulative_shared_pv_cost": 0.0,
+                    "cumulative_shared_pv_revenue": 0.0,
+            
+                    "cumulative_shared_pv_received_kwh": 0.0,
+                    "cumulative_shared_pv_supplied_kwh": 0.0,
                     "cumulative_net_cost": 0.0,
                 }
-            self.house_totals[house_name]["cumulative_import_cost"] += (
-                house_financials["import_cost"]
-            )
+            self.house_totals[house_name][
+                "cumulative_import_cost"
+            ] += house_financials["import_cost"]
             
-            self.house_totals[house_name]["cumulative_export_revenue"] += (
-                house_financials["export_revenue"]
-            )
+            self.house_totals[house_name][
+                "cumulative_export_revenue"
+            ] += house_financials["export_revenue"]
             
-            self.house_totals[house_name]["cumulative_net_cost"] += (
-                house_financials["net_cost"]
-            )
+            self.house_totals[house_name][
+                "cumulative_shared_pv_cost"
+            ] += house_financials["shared_pv_cost"]
+            
+            self.house_totals[house_name][
+                "cumulative_shared_pv_revenue"
+            ] += house_financials["shared_pv_revenue"]
+            
+            self.house_totals[house_name][
+                "cumulative_shared_pv_received_kwh"
+            ] += house_financials["shared_pv_received_kwh"]
+            
+            self.house_totals[house_name][
+                "cumulative_shared_pv_supplied_kwh"
+            ] += house_financials["shared_pv_supplied_kwh"]
+            
+            self.house_totals[house_name][
+                "cumulative_net_cost"
+            ] += house_financials["net_cost"]
+            
             house_financials.update(
                 self.house_totals[house_name]
             )
@@ -217,17 +289,25 @@ class FinancialModel:
         # VPP CUMULATIVE FINANCIAL RESULTS
         # --------------------------------------------------
     
-        self.vpp_totals["cumulative_import_cost"] += (
-            vpp_financials["import_cost"]
-        )
-    
-        self.vpp_totals["cumulative_export_revenue"] += (
-            vpp_financials["export_revenue"]
-        )
-    
-        self.vpp_totals["cumulative_net_cost"] += (
-            vpp_financials["net_cost"]
-        )
+        self.vpp_totals[
+            "cumulative_import_cost"
+        ] += vpp_financials["import_cost"]
+        
+        self.vpp_totals[
+            "cumulative_export_revenue"
+        ] += vpp_financials["export_revenue"]
+        
+        self.vpp_totals[
+            "cumulative_shared_pv_cost"
+        ] += vpp_financials["shared_pv_cost"]
+        
+        self.vpp_totals[
+            "cumulative_shared_pv_revenue"
+        ] += vpp_financials["shared_pv_revenue"]
+        
+        self.vpp_totals[
+            "cumulative_net_cost"
+        ] += vpp_financials["net_cost"]
     
         # Add cumulative totals after all houses are aggregated
         vpp_financials.update(
