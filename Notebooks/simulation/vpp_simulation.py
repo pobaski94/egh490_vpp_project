@@ -189,7 +189,6 @@ class VPPSimulation:
         shared_pv_balance_error_kw = (
             total_shared_pv_supplied_kw - total_shared_pv_received_kw
         )
-        
 
         # --------------------------------------------------------
         # SIMULATION TIME
@@ -243,8 +242,8 @@ class VPPSimulation:
             for h in house_results
         )
 
-        total_house_net_power_kw = sum(
-            h["net_power_kw"]
+        total_house_physical_net_power_kw = sum(
+            h["physical_net_power_kw"]
             for h in house_results
         )
 
@@ -277,6 +276,16 @@ class VPPSimulation:
             for h in house_results
         )
 
+        total_external_grid_import_kw = sum(
+            h["external_grid_import_kw"]
+            for h in house_results
+        )
+        
+        total_external_grid_export_kw = sum(
+            h["external_grid_export_kw"]
+            for h in house_results
+        )
+
         # External demonstration quantities.
         total_local_load_kw = (
             hospital_result["load_kw"]
@@ -297,7 +306,9 @@ class VPPSimulation:
         #   negative VPP net power = net grid export
 
         
-        vpp_net_power_kw = total_house_net_power_kw
+        vpp_net_power_kw = (
+            total_house_physical_net_power_kw
+        )
         
         vpp_grid_import_kw = max(
             vpp_net_power_kw,
@@ -307,6 +318,18 @@ class VPPSimulation:
         vpp_grid_export_kw = -min(
             vpp_net_power_kw,
             0.0
+        )
+
+        # Accounting consistency check
+        
+        external_grid_net_power_kw = (
+            total_external_grid_import_kw
+            - total_external_grid_export_kw
+        )
+        
+        vpp_power_balance_error_kw = (
+            vpp_net_power_kw
+            - external_grid_net_power_kw
         )
         
         
@@ -383,6 +406,7 @@ class VPPSimulation:
             "VPP_net_power_kw": vpp_net_power_kw,
             "VPP_grid_import_kw": vpp_grid_import_kw,
             "VPP_grid_export_kw": vpp_grid_export_kw,
+            "VPP_power_balance_error_kw": vpp_power_balance_error_kw,
             
             # External demonstration resources
             "Hospital_load_kw": total_local_load_kw,
@@ -456,7 +480,27 @@ class VPPSimulation:
                 financial_results["VPP"]["cumulative_export_revenue"],
             
             "VPP_cumulative_net_cost":
-                financial_results["VPP"]["cumulative_net_cost"]
+                financial_results["VPP"]["cumulative_net_cost"],
+            
+            "VPP_shared_pv_received_kwh":
+                financial_results["VPP"][
+                    "shared_pv_received_kwh"
+                ],
+            
+            "VPP_shared_pv_supplied_kwh":
+                financial_results["VPP"][
+                    "shared_pv_supplied_kwh"
+                ],
+            
+            "VPP_shared_pv_cost":
+                financial_results["VPP"][
+                    "shared_pv_cost"
+                ],
+            
+            "VPP_shared_pv_revenue":
+                financial_results["VPP"][
+                    "shared_pv_revenue"
+                ],
         }
 
 

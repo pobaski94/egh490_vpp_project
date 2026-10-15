@@ -19,12 +19,13 @@ class VPPController:
     physical DER and connection-point constraints.
 
     Current operating priority:
-        1. explicit network-support request,
-        2. manual/test override,
-        3. scheduled cheap-energy charging,
-        4. scheduled peak shaving,
-        5. grid-import-limit response,
-        6. normal/default operation.
+        1. network support
+        2. manual
+        3. arbitrage charge
+        4. economic export
+        5. peak shaving
+        6. grid import response
+        7. default
 
     PV sharing is treated as a secondary VPP action rather than
     a standalone operating mode.
@@ -335,7 +336,9 @@ class VPPController:
         # ----------------------------------------------------
         # PRIORITY 5 - SCHEDULED PEAK SHAVING
         # ----------------------------------------------------
-
+        # Enables the peak-management strategy. The strategy remains active throughout the day so batteries 
+        # may preserve/charge energy outside the designated peak period.
+        
         elif peak_shaving_enabled:
            
             active_mode = "peak_shaving"
@@ -377,7 +380,8 @@ class VPPController:
             pv_sharing_enabled
             and active_mode in [
                 "self_consumption",
-                "peak_shaving"
+                "peak_shaving",
+                "economic_export"
             ]
             and not (
                 peak_shaving_enabled

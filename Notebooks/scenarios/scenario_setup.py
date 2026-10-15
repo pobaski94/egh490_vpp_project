@@ -24,6 +24,54 @@ SIGEN_MODULE_USABLE_KWH = 8.76
 SIGEN_MODULE_POWER_KW = 4.6
 BESS_INVERTER_LIMIT_KW = 10.0
 
+PEAK_HOURS = [
+    16.0, 16.5,
+    17.0, 17.5,
+    18.0, 18.5,
+    19.0, 19.5,
+    20.0, 20.5,
+]
+
+ECONOMIC_EXPORT_RESERVE_PERCENT = 30
+
+COORDINATED_INPUTS = {
+    "pv_sharing_enabled": True,
+    "peak_shaving_enabled": False,
+    "economic_export_enabled": True,
+}
+
+INDEPENDENT_INPUTS = {
+    "pv_sharing_enabled": False,
+    "peak_shaving_enabled": False,
+    "economic_export_enabled": True,
+}
+
+
+def create_controller():
+    return VPPController(
+        default_mode="self_consumption",
+        peak_hours=PEAK_HOURS,
+        cheap_energy_hours=[],
+        economic_export_reserve_percent=(
+            ECONOMIC_EXPORT_RESERVE_PERCENT
+        )
+    )
+
+def create_external_resources(
+    hospital_load_profile,
+    wind_generation_profile
+):
+    hospital = LocalLoad(
+        "Hospital",
+        hospital_load_profile
+    )
+
+    wind = WindTurbine(
+        "DFIG Wind Placeholder",
+        wind_generation_profile
+    )
+
+    return hospital, wind
 
 def create_sigenstor_spec(
     module_count,
@@ -195,18 +243,7 @@ def create_coordinated_vpp_scenario(
     tariff=BATTERY_STARTER
 ):
 
-    controller = VPPController(
-        default_mode="self_consumption",
-        peak_hours=[
-            16.0, 16.5,
-            17.0, 17.5,
-            18.0, 18.5,
-            19.0, 19.5,
-            20.0, 20.5,
-        ],
-        cheap_energy_hours=[],
-        economic_export_reserve_percent=30
-    )
+    controller = create_controller()
 
     houses = create_houses(
         house_loads=house_loads,
@@ -217,13 +254,8 @@ def create_coordinated_vpp_scenario(
         )
     )
 
-    hospital = LocalLoad(
-        "Hospital",
-        hospital_load_profile
-    )
-
-    wind = WindTurbine(
-        "DFIG Wind Placeholder",
+    hospital, wind = create_external_resources(
+        hospital_load_profile,
         wind_generation_profile
     )
 
@@ -263,28 +295,14 @@ def create_independent_dynamic_scenario(
         )
     )
 
-    controller = VPPController(
-        default_mode="self_consumption",
-        peak_hours=[
-            16.0, 16.5,
-            17.0, 17.5,
-            18.0, 18.5,
-            19.0, 19.5,
-            20.0, 20.5,
-        ],
-        cheap_energy_hours=[],
-        economic_export_reserve_percent=30
-    )
+    controller = create_controller()
 
-    hospital = LocalLoad(
-        "Hospital",
-        hospital_load_profile
-    )
-
-    wind = WindTurbine(
-        "DFIG Wind Placeholder",
+    hospital, wind = create_external_resources(
+        hospital_load_profile,
         wind_generation_profile
     )
+    
+
 
     financial_model = FinancialModel(
         tariff=tariff
@@ -322,27 +340,11 @@ def create_independent_fixed_scenario(
         )
     )
 
-    controller = VPPController(
-        default_mode="self_consumption",
-        peak_hours=[
-            16.0, 16.5,
-            17.0, 17.5,
-            18.0, 18.5,
-            19.0, 19.5,
-            20.0, 20.5,
-        ],
-        cheap_energy_hours=[],
-        economic_export_reserve_percent=30
-    )
+    controller = create_controller()
 
 
-    hospital = LocalLoad(
-        "Hospital",
-        hospital_load_profile
-    )
-    
-    wind = WindTurbine(
-        "DFIG Wind Placeholder",
+    hospital, wind = create_external_resources(
+        hospital_load_profile,
         wind_generation_profile
     )
     

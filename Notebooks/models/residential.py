@@ -307,6 +307,13 @@ class House:
                 0.0
             )
 
+            # Shared PV supplied by this premises cannot exceed
+            # the modelled maximum physical export capability.
+            shared_pv_available_kw = min(
+                shared_pv_available_kw,
+                self.max_export_limit_kw
+            )
+
             # Battery charging capability remaining after allowing
             # for this house's own surplus PV.
             vpp_available_charge_kw = max(
@@ -363,18 +370,18 @@ class House:
                 vpp_available_discharge_kw,
 
             # Installed PV and connection metadata
-            "pv_array_kwp": self.pv_array_kwp,
-            "pv_inverter_limit_kw":
-                self.pv_inverter_limit_kw,
+            # "pv_array_kwp": self.pv_array_kwp,
+            # "pv_inverter_limit_kw":
+            #     self.pv_inverter_limit_kw,
 
-            "connection_type": self.connection_type,
-            "connection_phases":
-                self.connection_phases,
+            # "connection_type": self.connection_type,
+            # "connection_phases":
+            #     self.connection_phases,
 
-            "min_export_limit_kw":
-                self.min_export_limit_kw,
-            "max_export_limit_kw":
-                self.max_export_limit_kw,
+            # "min_export_limit_kw":
+            #     self.min_export_limit_kw,
+            # "max_export_limit_kw":
+            #     self.max_export_limit_kw,
 
             "dynamic_export_limit_kw":
                 self.dynamic_export_limit_kw,
@@ -539,11 +546,9 @@ class House:
         #   - does NOT create additional battery export headroom.
         
         effective_export_limit_kw = min(
-            max(
-                current_export_limit_kw,
-                shared_pv_supplied_kw
-            ),
-            self.max_export_limit_kw
+                current_export_limit_kw +
+                shared_pv_supplied_kw,           
+                self.max_export_limit_kw
         )
         
         # ----------------------------------------------------
@@ -722,62 +727,99 @@ class House:
             # limit.
             
             elif mode == "economic_export":
-            
-                # Maximum discharge that can be accommodated
-                # at the premises connection point consists of:
-                #
-                #   remaining local household demand
-                #               +
-                #   available grid-export headroom
-            
+
+                # Remaining household demand after own PV and
+                # any received shared PV.
                 local_import_kw = max(
                     effective_net_power_kw,
                     0.0
                 )
             
-                maximum_connection_permitted_discharge_kw = (
-                    local_import_kw
-                    + export_headroom_kw
+                # ------------------------------------------------
+                # PHYSICAL BATTERY DISCHARGE AVAILABLE
+                # ------------------------------------------------
+            
+                available_energy_kwh = max(
+                    self.battery.soc_kwh
+                    - self.battery.min_soc_kwh,
+                    0.0
                 )
             
-                # Request the maximum economically available
-                # battery discharge permitted by the connection.
+                physical_available_discharge_kw = min(
+                    self.battery.max_discharge_kw,
+                    available_energy_kwh
+                    * self.battery.efficiency
+                    / timestep_hours
+                )
+            
+                # ------------------------------------------------
+                # PRIORITY 1 - SERVE LOCAL HOUSEHOLD LOAD
+                # ------------------------------------------------
                 #
-                # The Battery object subsequently enforces its
-                # own physical power and stored-energy limits.
-                # ----------------------------------------------
-                # ECONOMIC EXPORT SOC RESERVE
-                # ----------------------------------------------
-                
-                # Strategic reserve retained for later household use.
+                # The economic-export reserve does not prevent
+                # the battery from supporting its own household.
+            
+                local_load_discharge_kw = min(
+                    local_import_kw,
+                    physical_available_discharge_kw
+                )
+            
+                # Estimate battery SOC after supplying local load.
+                projected_soc_after_local_kwh = (
+                    self.battery.soc_kwh
+                    - (
+                        local_load_discharge_kw
+                        * timestep_hours
+                        / self.battery.efficiency
+                    )
+                )
+            
+                # ------------------------------------------------
+                # PRIORITY 2 - DELIBERATE ECONOMIC EXPORT
+                # ------------------------------------------------
+            
                 reserve_soc_kwh = (
                     self.battery.capacity_kwh
                     * economic_export_reserve_percent
                     / 100.0
                 )
-                
-                # Only energy above the strategic reserve may be
-                # deliberately exported.
-                available_energy_above_reserve_kwh = max(
-                    self.battery.soc_kwh
+            
+                # Only stored energy remaining above the reserve
+                # may be deliberately exported.
+                available_export_energy_kwh = max(
+                    projected_soc_after_local_kwh
                     - reserve_soc_kwh,
                     0.0
                 )
-                # Maximum electrical discharge that can be sustained
-                # for this timestep without crossing the reserve.
-                reserve_limited_discharge_kw = min(
-                    self.battery.max_discharge_kw,
-                    available_energy_above_reserve_kwh
+            
+                # Remaining inverter discharge capability after
+                # serving household demand.
+                remaining_discharge_power_kw = max(
+                    self.battery.max_discharge_kw
+                    - local_load_discharge_kw,
+                    0.0
+                )
+            
+                reserve_limited_export_kw = min(
+                    remaining_discharge_power_kw,
+                    available_export_energy_kwh
                     * self.battery.efficiency
                     / timestep_hours
                 )
-                # Respect both the connection constraint and the
-                # economic-export reserve.                
-                requested_discharge_kw = min(
-                    maximum_connection_permitted_discharge_kw,
-                    reserve_limited_discharge_kw
+            
+                # Deliberate export remains limited by normal
+                # connection export headroom.
+                economic_export_kw = min(
+                    export_headroom_kw,
+                    reserve_limited_export_kw
                 )
-                
+            
+                # Household support first, deliberate export second.
+                requested_discharge_kw = (
+                    local_load_discharge_kw
+                    + economic_export_kw
+                )
+            
                 battery_power_kw = self.battery.discharge(
                     requested_discharge_kw,
                     timestep_hours
@@ -1096,37 +1138,41 @@ class House:
             # ------------------------------------------------
             # Physical house configuration
             # ------------------------------------------------
-            "pv_array_kwp": self.pv_array_kwp,
-            "pv_inverter_limit_kw":
-                self.pv_inverter_limit_kw,
 
-            "connection_type":
-                self.connection_type,
-            "connection_phases":
-                self.connection_phases,
+            
+            # "pv_array_kwp": self.pv_array_kwp,
+            # "pv_inverter_limit_kw":
+            #     self.pv_inverter_limit_kw,
 
-            "min_export_limit_kw":
-                self.min_export_limit_kw,
-            "max_export_limit_kw":
-                self.max_export_limit_kw,
+            # "connection_type":
+            #     self.connection_type,
+            # "connection_phases":
+            #     self.connection_phases,
+
+            # "min_export_limit_kw":
+            #     self.min_export_limit_kw,
+            # "max_export_limit_kw":
+            #     self.max_export_limit_kw,
+            
             "dynamic_export_limit_kw":
                 self.dynamic_export_limit_kw,
 
             # ------------------------------------------------
             # Battery configuration
             # ------------------------------------------------
-            "battery_manufacturer":
-                battery_manufacturer,
-            "battery_model":
-                battery_model,
-            "battery_module_count":
-                battery_module_count,
-            "battery_capacity_kwh":
-                battery_capacity_kwh,
-            "battery_max_charge_kw":
-                battery_max_charge_kw,
-            "battery_max_discharge_kw":
-                battery_max_discharge_kw,
+            
+            # "battery_manufacturer":
+            #     battery_manufacturer,
+            # "battery_model":
+            #     battery_model,
+            # "battery_module_count":
+            #     battery_module_count,
+            # "battery_capacity_kwh":
+            #     battery_capacity_kwh,
+            # "battery_max_charge_kw":
+            #     battery_max_charge_kw,
+            # "battery_max_discharge_kw":
+            #     battery_max_discharge_kw,
 
 
             # ------------------------------------------------
@@ -1171,8 +1217,8 @@ class House:
             "export_limit_active":
                 export_limit_active,
 
-            "battery_discharge_reduction_kw":
-                battery_discharge_reduction_kw,
+            # "battery_discharge_reduction_kw":
+            #     battery_discharge_reduction_kw,
 
             # ------------------------------------------------
             # Battery and final power-flow results
