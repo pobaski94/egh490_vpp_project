@@ -115,7 +115,8 @@ class House:
     def get_state(
         self,
         profile_index,
-        timestep_hours
+        timestep_hours,
+        vpp_event_reserve_percent=0.0
     ):
         """
         Determine the pre-control electrical state and available
@@ -172,7 +173,7 @@ class House:
         available_charge_kw = 0.0
 
         export_headroom_kw = 0.0
-        vpp_available_discharge_kw = 0.0
+
 
         local_battery_charge_from_pv_kw = 0.0
 
@@ -181,6 +182,8 @@ class House:
         shared_pv_available_kw = local_pv_surplus_kw
 
         vpp_available_charge_kw = 0.0
+
+        event_reserve_soc_kwh = 0.0
         
         
 
@@ -253,21 +256,6 @@ class House:
                 0.0
             )
 
-            # Battery discharge can:
-            #   1. offset this house's existing grid import, then
-            #   2. export through remaining connection headroom.
-            connection_permitted_discharge_kw = (
-                local_import_kw
-                + export_headroom_kw
-            )
-
-            # VPP-visible discharge capability is therefore the
-            # smaller of the physical battery capability and the
-            # connection-permitted capability.
-            vpp_available_discharge_kw = min(
-                available_discharge_kw,
-                connection_permitted_discharge_kw
-            )
             
             # ------------------------------------------------
             # BATTERY CHARGING CAPABILITY
@@ -329,6 +317,51 @@ class House:
                 local_import_kw
                 + vpp_available_charge_kw
             )
+            
+
+            event_reserve_soc_kwh = (
+                self.battery.capacity_kwh
+                * vpp_event_reserve_percent
+                / 100.0
+                
+            )
+        
+            event_available_energy_kwh = max(
+                self.battery.soc_kwh
+                - event_reserve_soc_kwh,
+                0.0
+            )
+        
+            event_available_battery_kw = min(
+                self.battery.max_discharge_kw,
+                event_available_energy_kwh
+                * self.battery.efficiency
+                / timestep_hours
+            )
+
+            event_available_battery_export_kw = max(
+                event_available_battery_kw
+                - local_import_kw,
+                0.0
+            )
+
+        
+        else:
+        
+            event_available_battery_kw = 0.0
+            event_available_battery_export_kw = 0.0
+
+
+        event_available_pv_kw = min(
+            local_pv_surplus_kw,
+            self.current_export_limit_kw
+        )
+
+        vpp_event_available_kw = min(
+            event_available_pv_kw + event_available_battery_export_kw,
+            self.current_export_limit_kw
+        )
+        
 
         return {
             # Identity and pre-control electrical state
@@ -366,22 +399,19 @@ class House:
 
             # Connection-constrained VPP capability
             "export_headroom_kw": export_headroom_kw,
-            "vpp_available_discharge_kw":
-                vpp_available_discharge_kw,
+            
+            "event_available_pv_kw":
+                event_available_pv_kw,
+            
+            "event_available_battery_kw":
+                event_available_battery_kw,
+            
+            "vpp_event_available_kw":
+                vpp_event_available_kw,
+            "event_available_battery_export_kw":
+                event_available_battery_export_kw,
+                        
 
-            # Installed PV and connection metadata
-            # "pv_array_kwp": self.pv_array_kwp,
-            # "pv_inverter_limit_kw":
-            #     self.pv_inverter_limit_kw,
-
-            # "connection_type": self.connection_type,
-            # "connection_phases":
-            #     self.connection_phases,
-
-            # "min_export_limit_kw":
-            #     self.min_export_limit_kw,
-            # "max_export_limit_kw":
-            #     self.max_export_limit_kw,
 
             "dynamic_export_limit_kw":
                 self.dynamic_export_limit_kw,
@@ -597,14 +627,310 @@ class House:
         battery_soc_percent = 0.0
 
         economic_export_reserve_percent = 0.0
+
         
+        # ----------------------------------------------------
+        # CONTROLLER SIGNALS USED BY ALL HOUSE TYPES
+        # ----------------------------------------------------
+        
+        mode = signals["mode"]
+        
+        economic_export_reserve_percent = signals.get(
+            "economic_export_reserve_percent",
+            0.0
+        )
+        
+        vpp_event_reserve_percent = signals.get(
+            "vpp_event_reserve_percent",
+            0.0
+        )
+        
+        is_peak_period = signals[
+            "is_peak_period"
+        ]
+        
+        is_grid_peak_limit_exceeded = signals[
+            "is_grid_peak_limit_exceeded"
+        ]
+        
+        is_cheap_energy_period = signals[
+            "is_cheap_energy_period"
+        ]
+        
+        economic_export_enabled = signals.get(
+            "economic_export_enabled",
+            False
+        )
+        
+        # Virtual net demand after any received shared PV.
+        effective_net_power_kw = (
+            net_power_kw_bb
+            - shared_pv_received_kw
+        )
+        
+        
+        # ----------------------------------------------------
+        # VPP EVENT ACCOUNTING DEFAULTS
+        # ----------------------------------------------------
+        
+        vpp_event_target_kw = 0.0
+        vpp_event_pv_export_kw = 0.0
+        vpp_event_battery_export_kw = 0.0
+        vpp_event_export_kw = 0.0
+
+        # ----------------------------------------------------
+        # MODE: NETWORK SUPPORT / VPP EVENT
+        # ----------------------------------------------------
+        #
+        # The allocated VPP target represents GRID EXPORT from
+        # this house, not simply battery discharge.
+        #
+        # Priority:
+        #   1. PV supplies local load naturally.
+        #   2. Surplus PV supplies the event target.
+        #   3. Battery covers any remaining event target,
+        #      subject to the VPP event SOC reserve.
+        #   4. If surplus PV remains after meeting the event
+        #      target, it may charge the battery.
+        #
+        # Houses without batteries can therefore still
+        # participate using surplus PV.
+        # ----------------------------------------------------
+        
+        if mode == "network_support":
+        
+            vpp_event_target_kw = signals[
+                "house_vpp_event_targets"
+            ].get(
+                self.name,
+                0.0
+            )
+        
+            # ------------------------------------------------
+            # AVAILABLE PV SURPLUS
+            # ------------------------------------------------
+        
+            local_pv_surplus_kw = max(
+                -effective_net_power_kw,
+                0.0
+            )
+        
+            # Use PV first toward the allocated VPP target.
+            vpp_event_pv_export_kw = min(
+                vpp_event_target_kw,
+                local_pv_surplus_kw,
+                current_export_limit_kw
+            )
+        
+            remaining_event_target_kw = max(
+                vpp_event_target_kw
+                - vpp_event_pv_export_kw,
+                0.0
+            )
+        
+            remaining_pv_surplus_kw = max(
+                local_pv_surplus_kw
+                - vpp_event_pv_export_kw,
+                0.0
+            )
+        
+            # ------------------------------------------------
+            # BATTERY-EQUIPPED HOUSE
+            # ------------------------------------------------
+        
+            if self.battery is not None:
+        
+                local_import_kw = max(
+                    effective_net_power_kw,
+                    0.0
+                )
+        
+                # Physical battery capability down to the true
+                # physical minimum SOC.
+                physical_available_energy_kwh = max(
+                    self.battery.soc_kwh
+                    - self.battery.min_soc_kwh,
+                    0.0
+                )
+        
+                physical_available_discharge_kw = min(
+                    self.battery.max_discharge_kw,
+                    physical_available_energy_kwh
+                    * self.battery.efficiency
+                    / timestep_hours
+                )
+        
+                # ------------------------------------------------
+                # FIRST SERVE LOCAL HOUSEHOLD LOAD
+                # ------------------------------------------------
+        
+                local_load_discharge_kw = min(
+                    local_import_kw,
+                    physical_available_discharge_kw
+                )
+        
+                projected_soc_after_local_kwh = (
+                    self.battery.soc_kwh
+                    - (
+                        local_load_discharge_kw
+                        * timestep_hours
+                        / self.battery.efficiency
+                    )
+                )
+        
+                # ------------------------------------------------
+                # EVENT RESERVE
+                # ------------------------------------------------
+        
+                event_reserve_soc_kwh = (
+                    self.battery.capacity_kwh
+                    * vpp_event_reserve_percent
+                    / 100.0
+                )
+        
+                available_event_energy_kwh = max(
+                    projected_soc_after_local_kwh
+                    - event_reserve_soc_kwh,
+                    0.0
+                )
+        
+                remaining_discharge_power_kw = max(
+                    self.battery.max_discharge_kw
+                    - local_load_discharge_kw,
+                    0.0
+                )
+        
+                # Connection capacity still available after the
+                # PV component of the VPP event.
+                event_export_headroom_kw = max(
+                    current_export_limit_kw
+                    - vpp_event_pv_export_kw,
+                    0.0
+                )
+        
+                vpp_event_battery_export_kw = min(
+                    remaining_event_target_kw,
+                    remaining_discharge_power_kw,
+                    event_export_headroom_kw,
+                    available_event_energy_kwh
+                    * self.battery.efficiency
+                    / timestep_hours
+                )
+                
+                # ------------------------------------------------
+                # OPTIONAL NORMAL ECONOMIC EXPORT AFTER VPP EVENT
+                # ------------------------------------------------
+                #
+                # The higher-value VPP event target is always
+                # satisfied first.
+                #
+                # If economic export is enabled and this timestep
+                # is also within the normal peak-export period,
+                # remaining battery capability may then be used
+                # for ordinary economic export.
+                
+                economic_export_kw = 0.0
+                
+                if (
+                    economic_export_enabled
+                    and is_peak_period
+                ):
+                
+                    # Battery SOC projected after:
+                    #   1. local household support
+                    #   2. VPP event battery export
+                    projected_soc_after_event_kwh = (
+                        projected_soc_after_local_kwh
+                        - (
+                            vpp_event_battery_export_kw
+                            * timestep_hours
+                            / self.battery.efficiency
+                        )
+                    )
+                
+                    # Economic export uses its own strategic
+                    # reserve, independent of the VPP event reserve.
+                    economic_reserve_soc_kwh = (
+                        self.battery.capacity_kwh
+                        * economic_export_reserve_percent
+                        / 100.0
+                    )
+                
+                    available_economic_export_energy_kwh = max(
+                        projected_soc_after_event_kwh
+                        - economic_reserve_soc_kwh,
+                        0.0
+                    )
+                
+                    # Remaining battery inverter capability after
+                    # local-load support and event export.
+                    remaining_economic_discharge_kw = max(
+                        self.battery.max_discharge_kw
+                        - local_load_discharge_kw
+                        - vpp_event_battery_export_kw,
+                        0.0
+                    )
+                
+                    # Remaining grid-export capability after both
+                    # PV event contribution and battery event export.
+                    remaining_export_headroom_kw = max(
+                        current_export_limit_kw
+                        - vpp_event_pv_export_kw
+                        - vpp_event_battery_export_kw,
+                        0.0
+                    )
+                
+                    reserve_limited_economic_export_kw = min(
+                        remaining_economic_discharge_kw,
+                        available_economic_export_energy_kwh
+                        * self.battery.efficiency
+                        / timestep_hours
+                    )
+                
+                    economic_export_kw = min(
+                        remaining_export_headroom_kw,
+                        reserve_limited_economic_export_kw
+                    )
+                
+                requested_discharge_kw = (
+                    local_load_discharge_kw
+                    + vpp_event_battery_export_kw
+                    + economic_export_kw
+                )
+        
+                # If battery discharge is required, perform it.
+                if requested_discharge_kw > 0.0:
+        
+                    battery_power_kw = self.battery.discharge(
+                        requested_discharge_kw,
+                        timestep_hours
+                    )
+        
+                # If PV completely satisfied the event target,
+                # remaining PV may charge the battery.
+                elif remaining_pv_surplus_kw > 0.0:
+        
+                    battery_power_kw = self.battery.charge(
+                        remaining_pv_surplus_kw,
+                        timestep_hours
+                    )
+        
+            # ------------------------------------------------
+            # TOTAL EVENT EXPORT
+            # ------------------------------------------------
+        
+            vpp_event_export_kw = (
+                vpp_event_pv_export_kw
+                + vpp_event_battery_export_kw
+            )
+
         
         # ----------------------------------------------------
         # BATTERY DISPATCH
         # ----------------------------------------------------
 
         
-        if self.battery is not None:
+        elif self.battery is not None:
 
             # Read the supervisory operating mode and supporting
             # controller flags for this timestep.
@@ -824,73 +1150,6 @@ class House:
                     requested_discharge_kw,
                     timestep_hours
                 )
-                    
-            # ------------------------------------------------
-            # MODE: NETWORK SUPPORT
-            # ------------------------------------------------
-            #
-            # Respond to an explicit external network-support
-            # request using the house-level discharge target
-            # allocated by the VPP controller.
-            #
-            # Battery discharge first offsets this house's own
-            # grid import. Any remaining requested discharge
-            # becomes grid export and must remain within the
-            # applicable connection export capability.
-         
-            elif mode == "network_support":
-
-                requested_target_kw = signals[
-                    "house_dispatch_targets"
-                ].get(
-                    self.name,
-                    0.0
-                )
-            
-                # Local demand that can be supplied without
-                # creating grid export.
-                local_import_kw = max(
-                    effective_net_power_kw,
-                    0.0
-                )
-
-                
-                # Maximum battery discharge permitted at the
-                # connection point:
-                #
-                #   local demand that can be offset
-                #               +
-                #   remaining battery export headroom
-                
-                maximum_connection_permitted_discharge_kw = (
-                    local_import_kw
-                    + export_headroom_kw
-                )
-                
-                # Reduce the controller target if the connection
-                # cannot accommodate the requested discharge.           
-                
-                permitted_target_kw = min(
-                    requested_target_kw,
-                    maximum_connection_permitted_discharge_kw
-                )
-
-                # Record any requested support that could not be
-                # delivered because of the connection constraint.
-                
-                battery_discharge_reduction_kw = max(
-                    requested_target_kw
-                    - permitted_target_kw,
-                    0.0
-                )
-                
-                # Battery object applies its own remaining physical
-                # power and stored-energy constraints.
-                
-                battery_power_kw = self.battery.discharge(
-                    permitted_target_kw,
-                    timestep_hours
-                )
 
             # ------------------------------------------------
             # MODE: ARBITRAGE CHARGE
@@ -916,10 +1175,22 @@ class House:
             
             # Record battery SOC after the requested physical
             # battery action has been applied.
+
+        # ----------------------------------------------------
+        # BATTERY SOC AFTER DISPATCH
+        # ----------------------------------------------------
+        
+        if self.battery is not None:
+        
+            battery_soc_kwh = (
+                self.battery.get_soc_kwh()
+            )
+        
+            battery_soc_percent = (
+                self.battery.get_soc_percent()
+            )
+
             
-            battery_soc_kwh = self.battery.get_soc_kwh()
-            battery_soc_percent = self.battery.get_soc_percent()
-                   
         # ----------------------------------------------------
         # ACTUAL BATTERY POWER COMPONENTS
         # ----------------------------------------------------
@@ -1074,6 +1345,29 @@ class House:
 
         external_grid_export_kwh = (
             external_grid_export_kw * timestep_hours
+        )
+
+        # Event export cannot exceed the actual external
+        # grid export achieved by this house.
+        actual_vpp_event_export_kw = min(
+            vpp_event_export_kw,
+            external_grid_export_kw
+        )
+        
+        vpp_event_export_kwh = (
+            actual_vpp_event_export_kw
+            * timestep_hours
+        )
+        
+        normal_grid_export_kw = max(
+            external_grid_export_kw
+            - actual_vpp_event_export_kw,
+            0.0
+        )
+        
+        normal_grid_export_kwh = (
+            normal_grid_export_kw
+            * timestep_hours
         )
         
         final_net_power_kw = physical_net_power_kw
@@ -1304,6 +1598,22 @@ class House:
             
             "external_grid_export_kwh":
                 external_grid_export_kwh,
+
+            "vpp_event_target_kw":
+                vpp_event_target_kw,
+            
+            "vpp_event_export_kw":
+                actual_vpp_event_export_kw,
+            
+            "vpp_event_export_kwh":
+                vpp_event_export_kwh,
+            
+            "normal_grid_export_kw":
+                normal_grid_export_kw,
+            
+            "normal_grid_export_kwh":
+                normal_grid_export_kwh,
+                        
         }
 
         

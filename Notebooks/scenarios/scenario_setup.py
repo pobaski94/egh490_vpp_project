@@ -33,6 +33,8 @@ PEAK_HOURS = [
 ]
 
 ECONOMIC_EXPORT_RESERVE_PERCENT = 30
+VPP_EVENT_RESERVE_PERCENT = 25
+
 
 COORDINATED_INPUTS = {
     "pv_sharing_enabled": True,
@@ -54,6 +56,9 @@ def create_controller():
         cheap_energy_hours=[],
         economic_export_reserve_percent=(
             ECONOMIC_EXPORT_RESERVE_PERCENT
+        ),
+        vpp_event_reserve_percent=(
+            VPP_EVENT_RESERVE_PERCENT
         )
     )
 

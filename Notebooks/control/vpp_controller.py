@@ -11,7 +11,7 @@ class VPPController:
 
         1. evaluates the current aggregate VPP state,
         2. selects the active VPP operating mode,
-        3. allocates network-support battery targets,
+        3. allocates network-support export targets,
         4. coordinates available surplus PV between houses, and
         5. returns supervisory signals to each House object.
 
@@ -37,7 +37,8 @@ class VPPController:
         peak_hours=None,
         cheap_energy_hours=None,
         grid_import_limit_kw=None,
-        economic_export_reserve_percent=0
+        economic_export_reserve_percent=0,
+        vpp_event_reserve_percent=0
     ):
 
         # Normal operating mode when no higher-priority
@@ -63,6 +64,10 @@ class VPPController:
         self.economic_export_reserve_percent = (
             economic_export_reserve_percent
         )
+        self.vpp_event_reserve_percent = (
+            vpp_event_reserve_percent
+        )
+        
         
     def get_signals(
         self,
@@ -153,7 +158,7 @@ class VPPController:
             False
         )
 
-        # Aggregate battery support power requested from the VPP.
+        # Aggregate VPP event export power requested from the VPP.
         requested_support_kw = external_inputs.get(
             "requested_support_kw",
             0.0
@@ -188,9 +193,12 @@ class VPPController:
         # INITIALISE HOUSE-LEVEL CONTROL TARGETS
         # ----------------------------------------------------
 
-        # Battery discharge targets used during explicit
-        # network-support operation.
-        house_dispatch_targets = {}
+        # House-level VPP event export targets.
+        #
+        # These targets represent the amount of grid export
+        # requested from each house during a VPP event.
+        
+        house_vpp_event_targets = {}
 
         # Shared PV allocated to receiving VPP houses.
         house_shared_pv_targets = {}
@@ -200,11 +208,11 @@ class VPPController:
         # supplying the transferred surplus energy.
         house_shared_export_targets = {} 
         
-        # Aggregate battery discharge capability currently
+        # Aggregate battery discharge and PV export capability currently
         # available to the VPP after physical battery and
         # connection constraints reported by each house.
-        total_available_discharge_kw = sum(
-            state["vpp_available_discharge_kw"]
+        total_vpp_event_available_kw = sum(
+            state["vpp_event_available_kw"]
             for state in house_states
         )
         
@@ -216,7 +224,7 @@ class VPPController:
         # Only one primary operating mode is selected for the
         # current timestep.
 
-
+        EPSILON = 1e-9
         # ----------------------------------------------------
         # PRIORITY 1 - EXPLICIT NETWORK SUPPORT
         # ----------------------------------------------------
@@ -225,83 +233,118 @@ class VPPController:
 
             active_mode = "network_support"
 
-            # Select battery-equipped houses that currently have
-            # usable VPP discharge capability.
+            # Select houses that currently have usable
+            # VPP event export capability.
+            
             available_houses = [
                 state
                 for state in house_states
-                if state["has_battery"]
-                and state["vpp_available_discharge_kw"] > 0
+                if state[
+                    "vpp_event_available_kw"
+                ] > EPSILON
             ]
-
-            # Remaining aggregate support request that has not yet
-            # been allocated among participating batteries.
-            remaining_support_kw = (
-                requested_support_kw
+            
+            remaining_support_kw = max(
+                requested_support_kw,
+                0.0
             )
-
-            # Iteratively divide the remaining request equally
-            # between houses that still have discharge capacity.
-            #
-            # If one house reaches its available limit, its unused
-            # share is redistributed among the remaining houses.
+            
+            MAX_ALLOCATION_PASSES = 20
+            allocation_pass = 0
+            
             while (
                 available_houses
-                and remaining_support_kw > 0
+                and remaining_support_kw > EPSILON
+                and allocation_pass < MAX_ALLOCATION_PASSES
             ):
-
+            
+                allocation_pass += 1
+            
+                previous_remaining_support_kw = (
+                    remaining_support_kw
+                )
+            
                 equal_share_kw = (
                     remaining_support_kw
                     / len(available_houses)
                 )
-
+            
                 still_available_houses = []
-
+            
                 for state in available_houses:
-
+            
                     house_name = state["name"]
-
-                    available_kw = state[
-                        "vpp_available_discharge_kw"
-                    ]
-
-                    # Support already allocated to this house
-                    # during a previous redistribution pass.
-                    already_dispatched_kw = (
-                        house_dispatch_targets.get(
+            
+                    available_kw = max(
+                        state[
+                            "vpp_event_available_kw"
+                        ],
+                        0.0
+                    )
+            
+                    already_allocated_kw = (
+                        house_vpp_event_targets.get(
                             house_name,
                             0.0
                         )
                     )
-
-                    remaining_house_capacity_kw = (
+            
+                    remaining_house_capacity_kw = max(
                         available_kw
-                        - already_dispatched_kw
+                        - already_allocated_kw,
+                        0.0
                     )
-
-                    dispatch_kw = min(
+            
+                    if remaining_house_capacity_kw <= EPSILON:
+                        continue
+            
+                    allocation_kw = min(
                         equal_share_kw,
+                        remaining_house_capacity_kw,
+                        remaining_support_kw
+                    )
+            
+                    if allocation_kw <= EPSILON:
+                        continue
+            
+                    house_vpp_event_targets[
+                        house_name
+                    ] = (
+                        already_allocated_kw
+                        + allocation_kw
+                    )
+            
+                    remaining_support_kw = max(
+                        remaining_support_kw
+                        - allocation_kw,
+                        0.0
+                    )
+            
+                    remaining_house_capacity_kw = max(
                         remaining_house_capacity_kw
+                        - allocation_kw,
+                        0.0
                     )
-
-                    house_dispatch_targets[house_name] = (
-                        already_dispatched_kw
-                        + dispatch_kw
-                    )
-
-                    remaining_support_kw -= dispatch_kw
-                    remaining_house_capacity_kw -= dispatch_kw
-
-                    # Retain houses that can accept another share
-                    # during the next redistribution pass.
-                    if remaining_house_capacity_kw > 0:
+            
+                    if (
+                        remaining_house_capacity_kw
+                        > EPSILON
+                    ):
                         still_available_houses.append(
                             state
                         )
-
+            
                 available_houses = (
                     still_available_houses
                 )
+            
+                progress_kw = (
+                    previous_remaining_support_kw
+                    - remaining_support_kw
+                )
+            
+                if progress_kw <= EPSILON:
+                    break
                 
        
         # ----------------------------------------------------
@@ -381,7 +424,6 @@ class VPPController:
             and active_mode in [
                 "self_consumption",
                 "peak_shaving",
-                "economic_export"
             ]
             and not (
                 peak_shaving_enabled
@@ -403,7 +445,7 @@ class VPPController:
                 for state in house_states
                 if state[
                     "shared_pv_receiving_capacity_kw"
-                ] > 0
+                ] > EPSILON
             ]
 
             remaining_shared_pv_kw = (
@@ -413,68 +455,111 @@ class VPPController:
             # Allocate available shared PV equally between
             # receiving houses, redistributing unused shares when
             # an individual house reaches its receiving capacity.
+            
+            MAX_ALLOCATION_PASSES = 20
+            
+            allocation_pass = 0
+            
             while (
                 available_houses
-                and remaining_shared_pv_kw > 0
+                and remaining_shared_pv_kw > EPSILON
+                and allocation_pass < MAX_ALLOCATION_PASSES
             ):
-
+            
+                allocation_pass += 1
+            
+                previous_remaining_shared_pv_kw = (
+                    remaining_shared_pv_kw
+                )
+            
                 equal_share_kw = (
                     remaining_shared_pv_kw
                     / len(available_houses)
                 )
-
+            
                 still_available_houses = []
-
+            
                 for state in available_houses:
-
+            
                     house_name = state["name"]
-
-                    available_kw = state[
-                        "shared_pv_receiving_capacity_kw"
-                    ]
-
+            
+                    available_kw = max(
+                        state[
+                            "shared_pv_receiving_capacity_kw"
+                        ],
+                        0.0
+                    )
+            
                     already_allocated_kw = (
                         house_shared_pv_targets.get(
                             house_name,
                             0.0
                         )
                     )
-
-                    remaining_house_capacity_kw = (
+            
+                    # Never allow numerical error to create
+                    # a negative remaining capacity.
+                    remaining_house_capacity_kw = max(
                         available_kw
-                        - already_allocated_kw
+                        - already_allocated_kw,
+                        0.0
                     )
-
-                    # Shared-PV allocation may serve either
-                    # household demand or battery charging.
+            
+                    if (
+                        remaining_house_capacity_kw
+                        <= EPSILON
+                    ):
+                        continue
+            
                     allocation_kw = min(
                         equal_share_kw,
-                        remaining_house_capacity_kw
+                        remaining_house_capacity_kw,
+                        remaining_shared_pv_kw
                     )
-
+            
+                    # Ignore numerical dust.
+                    if allocation_kw <= EPSILON:
+                        continue
+            
                     house_shared_pv_targets[
                         house_name
                     ] = (
                         already_allocated_kw
                         + allocation_kw
                     )
-
-                    remaining_shared_pv_kw -= (
-                        allocation_kw
+            
+                    remaining_shared_pv_kw = max(
+                        remaining_shared_pv_kw
+                        - allocation_kw,
+                        0.0
                     )
-
-                    remaining_house_capacity_kw -= (
-                        allocation_kw
+            
+                    remaining_house_capacity_kw = max(
+                        remaining_house_capacity_kw
+                        - allocation_kw,
+                        0.0
                     )
-
-                    if remaining_house_capacity_kw > 0:
+            
+                    if (
+                        remaining_house_capacity_kw
+                        > EPSILON
+                    ):
                         still_available_houses.append(
                             state
                         )
-
+            
                 available_houses = (
                     still_available_houses
-                ) 
+                )
+            
+                # Stop if this pass made effectively no progress.
+                progress_kw = (
+                    previous_remaining_shared_pv_kw
+                    - remaining_shared_pv_kw
+                )
+            
+                if progress_kw <= EPSILON:
+                    break
 
         # ====================================================
         # A09 - ACTUAL SHARED-PV TRANSFER
@@ -554,6 +639,9 @@ class VPPController:
                 economic_export_enabled,
             "economic_export_reserve_percent":
                 self.economic_export_reserve_percent,
+            "vpp_event_reserve_percent":
+                self.vpp_event_reserve_percent,
+            
 
             # Network-support event state.
             "is_event_period":
@@ -566,16 +654,16 @@ class VPPController:
             "requested_support_kw":
                 requested_support_kw,
 
-            "house_dispatch_targets":
-                house_dispatch_targets,
+            "house_vpp_event_targets":
+                house_vpp_event_targets,
 
             # Aggregate pre-control VPP state
             "vpp_grid_import_before_battery_kw":
                 vpp_grid_import_before_battery_kw,
 
             # Current VPP battery capability
-            "total_available_discharge_kw":
-                total_available_discharge_kw,
+            "total_vpp_event_available_kw":
+                total_vpp_event_available_kw,
 
             # Shared-PV state
             "total_shared_pv_transferred_kw":

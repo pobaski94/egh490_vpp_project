@@ -136,9 +136,11 @@ class VPPSimulation:
         house_states = [
             house.get_state(
                 profile_index,
-                self.timestep_hours
-                )
-                for house in self.houses
+                self.timestep_hours,
+                self.controller.vpp_evern_reserve_percent
+                
+            )
+        
         ]
         
         # Evaluate external demonstration resources separately.
@@ -424,7 +426,6 @@ class VPPSimulation:
             "PV_sharing_enabled": signals["pv_sharing_enabled"],
 
             "Requested_support_kw": signals["requested_support_kw"],
-            "Available_VPP_discharge_kw":signals["total_available_discharge_kw"],
             
             "Shared_PV_available_kw": signals["total_shared_pv_available_kw"],
             "Shared_PV_transferred_kw": signals["total_shared_pv_transferred_kw"],
@@ -501,6 +502,24 @@ class VPPSimulation:
                 financial_results["VPP"][
                     "shared_pv_revenue"
                 ],
+            
+            "VPP_event_export_kwh":
+                financial_results["VPP"]["vpp_event_export_kwh"],
+            
+            "VPP_normal_export_energy_kwh":
+                financial_results["VPP"]["normal_export_energy_kwh"],
+            
+            "VPP_event_export_revenue":
+                financial_results["VPP"]["vpp_event_export_revenue"],
+            
+            "VPP_normal_export_revenue":
+                financial_results["VPP"]["normal_export_revenue"],
+            
+            "VPP_event_available_kw":
+                signals["total_vpp_event_available_kw"],
+            
+            "House_vpp_event_targets":
+                signals["house_vpp_event_targets"],
         }
 
 
