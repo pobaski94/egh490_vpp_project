@@ -621,314 +621,396 @@ hardware = HardwareInterface()
 # ============================================================
 # CONTINUOUS DEMONSTRATOR LOOP
 # ============================================================
+def build_live_state(
+    coordinated_result,
+    independent_dynamic_result,
+    independent_fixed_result,
+    hardware_states,
+):
+    """
+    Build one dashboard snapshot from the latest
+    demonstrator timestep.
+    """
 
-try:
+    houses = {}
 
-    print(
-        "\nContinuous VPP demonstrator started."
+    for house in coordinated_simulation.houses:
+
+        latest = (
+            coordinated_simulation
+            .house_results_log[
+                house.name
+            ][-1]
+        )
+
+        houses[house.name] = {
+            "state":
+                hardware_states[
+                    house.name
+                ]["state"],
+
+            "load_kw":
+                latest["load_kw"],
+
+            "pv_kw":
+                latest["generation_kw"],
+
+            "battery_soc_kwh":
+                latest["battery_soc_kwh"],
+
+            "battery_soc_percent":
+                latest["battery_soc_percent"],
+
+            "battery_charge_kw":
+                latest["battery_charge_kw"],
+
+            "battery_discharge_kw":
+                latest["battery_discharge_kw"],
+
+            "grid_import_kw":
+                latest["external_grid_import_kw"],
+
+            "grid_export_kw":
+                latest["external_grid_export_kw"],
+
+            "current_export_limit_kw":
+                latest["current_export_limit_kw"],
+
+            "vpp_event_target_kw":
+                latest.get(
+                    "vpp_event_target_kw",
+                    0.0
+                ),
+
+            "vpp_event_export_kw":
+                latest.get(
+                    "vpp_event_export_kw",
+                    0.0
+                ),
+
+            "normal_grid_export_kw":
+                latest.get(
+                    "normal_grid_export_kw",
+                    0.0
+                ),
+        }
+
+    total_event_export_kw = sum(
+        data["vpp_event_export_kw"]
+        for data in houses.values()
     )
 
-    print(
-        "Use interrupt / stop to end the run.\n"
-    )
+    return {
+        "simulation": {
+            "step":
+                coordinated_result[
+                    "Simulation_step"
+                ],
 
-    while True:
+            "day":
+                coordinated_result[
+                    "Day_number"
+                ],
+
+            "hour":
+                coordinated_result[
+                    "Hour_of_day"
+                ],
+
+            "mode":
+                coordinated_result[
+                    "VPP_mode"
+                ],
+        },
+
+        "controls": {
+            "pv_sharing_enabled":
+                pv_sharing_enabled,
+
+            "economic_export_enabled":
+                economic_export_enabled,
+
+            "vpp_event_active":
+                network_support_active,
+        },
+
+        "vpp": {
+            "grid_import_kw":
+                coordinated_result[
+                    "VPP_grid_import_kw"
+                ],
+
+            "grid_export_kw":
+                coordinated_result[
+                    "VPP_grid_export_kw"
+                ],
+
+            "battery_power_kw":
+                coordinated_result[
+                    "Battery_power_kw"
+                ],
+
+            "battery_soc_kwh":
+                coordinated_result[
+                    "Battery_soc_kwh"
+                ],
+
+            "shared_pv_kw":
+                coordinated_result[
+                    "Shared_PV_transferred_kw"
+                ],
+
+            "requested_event_kw":
+                coordinated_result[
+                    "Requested_support_kw"
+                ],
+
+            "delivered_event_kw":
+                total_event_export_kw,
+
+            "available_event_kw":
+                coordinated_result.get(
+                    "VPP_event_available_kw",
+                    0.0
+                ),
+
+            "net_cost":
+                coordinated_result[
+                    "VPP_cumulative_net_cost"
+                ],
+        },
+
+        "comparison": {
+            "coordinated_net_cost":
+                coordinated_result[
+                    "VPP_cumulative_net_cost"
+                ],
+
+            "independent_dynamic_net_cost":
+                independent_dynamic_result[
+                    "VPP_cumulative_net_cost"
+                ],
+
+            "independent_fixed_net_cost":
+                independent_fixed_result[
+                    "VPP_cumulative_net_cost"
+                ],
+        },
+
+        "houses":
+            houses,
+    }
+
+
+def step_demonstrator():
+
+    global pv_sharing_enabled
+    global economic_export_enabled
+    global network_support_active
+    global vpp_event_end_step
+
+# try:
+
+#     print(
+#         "\nContinuous VPP demonstrator started."
+#     )
+
+#     print(
+#         "Use interrupt / stop to end the run.\n"
+#     )
+
+    # while True:
 
         # ----------------------------------------------------
         # READ HARDWARE INPUTS
         # ----------------------------------------------------
 
-        hardware_inputs = (
-            hardware.read_inputs()
-        )
-
-
-        # ----------------------------------------------------
-        # UPDATE DEMONSTRATOR TOGGLES
-        # ----------------------------------------------------
-        #
-        # For now these use defaults plus any values already
-        # provided by HardwareInterface.
-        #
-        # The HardwareInterface will be updated next so the
-        # physical buttons directly toggle:
-        #
-        #   - PV sharing
-        #   - economic export
-        #   - VPP network-support event
-        # ----------------------------------------------------
-
-        if (
-            "pv_sharing_enabled"
-            in hardware_inputs
-        ):
-
-            pv_sharing_enabled = (
-                hardware_inputs[
-                    "pv_sharing_enabled"
-                ]
-            )
-
-        if (
-            "economic_export_enabled"
-            in hardware_inputs
-        ):
-
-            economic_export_enabled = (
-                hardware_inputs[
-                    "economic_export_enabled"
-                ]
-            )
-
-
-        # ----------------------------------------------------
-        # NETWORK-SUPPORT EVENT TIMER
-        # ----------------------------------------------------
-
-        if hardware_inputs.get(
-            "network_support_request",
-            False
-        ):
-
-            if (
-                vpp_event_end_step
-                is None
-            ):
-
-                vpp_event_end_step = (
-                    coordinated_simulation
-                    .current_step
-                    + VPP_EVENT_DURATION_STEPS
-                )
-
-        if (
-            vpp_event_end_step
-            is not None
-        ):
-
-            network_support_active = (
-                coordinated_simulation
-                .current_step
-                < vpp_event_end_step
-            )
-
-            if not network_support_active:
-
-                vpp_event_end_step = None
-                
-                hardware.clear_network_support()
-
-        else:
-
-            network_support_active = False
-
-
-        # ----------------------------------------------------
-        # BUILD COORDINATED INPUTS
-        # ----------------------------------------------------
-
-        coordinated_inputs[
-            "pv_sharing_enabled"
-        ] = (
-            pv_sharing_enabled
-        )
-
-        coordinated_inputs[
-            "economic_export_enabled"
-        ] = (
-            economic_export_enabled
-        )
-
-        coordinated_inputs[
-            "network_support_request"
-        ] = (
-            network_support_active
-        )
-
-        coordinated_inputs[
-            "requested_support_kw"
-        ] = (
-            VPP_EVENT_REQUEST_KW
-            if network_support_active
-            else 0.0
-        )
-        
-        coordinated_inputs[
-            "vpp_tariff_event"
-        ] = (
-            network_support_active
-        )
-
-
-        # ----------------------------------------------------
-        # STEP COORDINATED VPP
-        # ----------------------------------------------------
-        current_hour = (
-            coordinated_simulation.current_step
-            * timestep_hours
-        ) % 24
-        
-       
-        coordinated_result = (
-            coordinated_simulation.step(
-                coordinated_inputs
-            )
-        )
-
-
-        # ----------------------------------------------------
-        # STEP BACKGROUND COMPARISON SCENARIOS
-        # ----------------------------------------------------
-
-        independent_dynamic_result = (
-            independent_dynamic_simulation
-            .step(
-                independent_inputs
-            )
-        )
-
-        independent_fixed_result = (
-            independent_fixed_simulation
-            .step(
-                independent_inputs
-            )
-        )
-
-
-        # ----------------------------------------------------
-        # UPDATE PHYSICAL HARDWARE
-        # ----------------------------------------------------
-
-        hardware_states = (
-            get_hardware_states(
-                coordinated_simulation
-            )
-        )
-
-        hardware.update_outputs(
-            coordinated_result,
-            hardware_states
-        )
-
-
-
-        # ----------------------------------------------------
-        # TEMPORARY CONSOLE DISPLAY
-        # ----------------------------------------------------
-        #
-        # This will eventually be replaced / supplemented by
-        # the graphical demonstrator dashboard.
-        # ----------------------------------------------------
-
-        print(
-            f"\n"
-            f"Step "
-            f"{coordinated_result['Simulation_step']} | "
-            f"Day "
-            f"{coordinated_result['Day_number']} | "
-            f"Hour "
-            f"{coordinated_result['Hour_of_day']:.1f}"
-        )
-
-        print(
-            f"Mode: "
-            f"{coordinated_result['VPP_mode']} | "
-            f"PV sharing: "
-            f"{'ON' if pv_sharing_enabled else 'OFF'} | "
-            f"Economic export: "
-            f"{'ON' if economic_export_enabled else 'OFF'} | "
-            f"VPP event: "
-            f"{'ON' if network_support_active else 'OFF'}"
-        )
-
-        print(
-            f"Net Cost: "
-            "VPP: "
-            f"${coordinated_result['VPP_cumulative_net_cost']:.2f} | "
-            f"Independent dynamic: "
-            f"${independent_dynamic_result['VPP_cumulative_net_cost']:.2f} | "
-            f"Independent fixed: "
-            f"${independent_fixed_result['VPP_cumulative_net_cost']:.2f}"
-        )
-
-        # for house in coordinated_simulation.houses:
-        #     latest = coordinated_simulation.house_results_log[house.name][-1]
-        #     state = hardware_states[house.name]["state"]
-
-        #     print(
-        #         f"{house.name}: "
-        #         f"{state:12s} | "
-        #         f"Load = {latest['load_kw']:.2f} kW | "
-        #         f"PV = {latest['generation_kw']:.2f} kW | "
-        #         f"Grid = {latest['net_power_kw']:.2f} kW | "
-        #         f"SOC = {latest['battery_soc_kwh']:.2f} kWh "
-        #         f"({latest['battery_soc_percent']:.1f}%) |"
-        #         f"Charge = {latest['battery_charge_kw']:.2f} kW | "
-        #         f"Discharge = {latest['battery_discharge_kw']:.2f} kW"
-        #     )
-
-        for house in coordinated_simulation.houses:
-
-            latest = (
-                coordinated_simulation
-                .house_results_log[house.name][-1]
-            )
-        
-            state = hardware_states[
-                house.name
-            ]["state"]
-        
-            print(
-                f"{house.name}: "
-                f"{state:12s} | "
-                f"Load={latest['load_kw']:.2f} kW | "
-                f"PV={latest['generation_kw']:.2f} kW | "
-                f"Event Target={latest.get('vpp_event_target_kw', 0.0):.2f} kW | "
-                f"Event Export={latest.get('vpp_event_export_kw', 0.0):.2f} kW | "
-                f"Normal Export={latest.get('normal_grid_export_kw', 0.0):.2f} kW | "
-                f"External Export={latest['external_grid_export_kw']:.2f} kW | "
-                f"Grid Import={latest['external_grid_import_kw']:.2f} kW | "
-                f"Battery Charge={latest['battery_charge_kw']:.2f} kW | "
-                f"Battery Discharge={latest['battery_discharge_kw']:.2f} kW | "
-                f"SOC={latest['battery_soc_kwh']:.2f} kWh "
-                f"({latest['battery_soc_percent']:.1f}%)"
-            )
-        
-
-        # print(
-        #     "Independent dynamic: "
-        #     f"${independent_dynamic_result['VPP_cumulative_net_cost']:.2f}"
-        # )
-
-        # print(
-        #     "Independent fixed: "
-        #     f"${independent_fixed_result['VPP_cumulative_net_cost']:.2f}"
-        # )
-
-
-        # ----------------------------------------------------
-        # PLAYBACK DELAY
-        # ----------------------------------------------------
-
-        time.sleep(
-            playback_delay_seconds
-        )
-
-
-except KeyboardInterrupt:
-
-    print(
-        "\nDemonstrator interrupted by user."
+    hardware_inputs = (
+        hardware.read_inputs()
     )
 
 
-finally:
+    # ----------------------------------------------------
+    # UPDATE DEMONSTRATOR TOGGLES
+    # ----------------------------------------------------
+    #
+    # For now these use defaults plus any values already
+    # provided by HardwareInterface.
+    #
+    # The HardwareInterface will be updated next so the
+    # physical buttons directly toggle:
+    #
+    #   - PV sharing
+    #   - economic export
+    #   - VPP network-support event
+    # ----------------------------------------------------
+
+    if (
+        "pv_sharing_enabled"
+        in hardware_inputs
+    ):
+
+        pv_sharing_enabled = (
+            hardware_inputs[
+                "pv_sharing_enabled"
+            ]
+        )
+
+    if (
+        "economic_export_enabled"
+        in hardware_inputs
+    ):
+
+        economic_export_enabled = (
+            hardware_inputs[
+                "economic_export_enabled"
+            ]
+        )
+
+
+    # ----------------------------------------------------
+    # NETWORK-SUPPORT EVENT TIMER
+    # ----------------------------------------------------
+
+    if hardware_inputs.get(
+        "network_support_request",
+        False
+    ):
+
+        if (
+            vpp_event_end_step
+            is None
+        ):
+
+            vpp_event_end_step = (
+                coordinated_simulation
+                .current_step
+                + VPP_EVENT_DURATION_STEPS
+            )
+
+    if (
+        vpp_event_end_step
+        is not None
+    ):
+
+        network_support_active = (
+            coordinated_simulation
+            .current_step
+            < vpp_event_end_step
+        )
+
+        if not network_support_active:
+
+            vpp_event_end_step = None
+            
+            hardware.clear_network_support()
+
+    else:
+
+        network_support_active = False
+
+
+    # ----------------------------------------------------
+    # BUILD COORDINATED INPUTS
+    # ----------------------------------------------------
+
+    coordinated_inputs[
+        "pv_sharing_enabled"
+    ] = (
+        pv_sharing_enabled
+    )
+
+    coordinated_inputs[
+        "economic_export_enabled"
+    ] = (
+        economic_export_enabled
+    )
+
+    coordinated_inputs[
+        "network_support_request"
+    ] = (
+        network_support_active
+    )
+
+    coordinated_inputs[
+        "requested_support_kw"
+    ] = (
+        VPP_EVENT_REQUEST_KW
+        if network_support_active
+        else 0.0
+    )
+    
+    coordinated_inputs[
+        "vpp_tariff_event"
+    ] = (
+        network_support_active
+    )
+
+
+    # ----------------------------------------------------
+    # STEP COORDINATED VPP
+    # ----------------------------------------------------
+   
+    coordinated_result = (
+        coordinated_simulation.step(
+            coordinated_inputs
+        )
+    )
+
+
+    # ----------------------------------------------------
+    # STEP BACKGROUND COMPARISON SCENARIOS
+    # ----------------------------------------------------
+
+    independent_dynamic_result = (
+        independent_dynamic_simulation
+        .step(
+            independent_inputs
+        )
+    )
+
+    independent_fixed_result = (
+        independent_fixed_simulation
+        .step(
+            independent_inputs
+        )
+    )
+
+
+    # ----------------------------------------------------
+    # UPDATE PHYSICAL HARDWARE
+    # ----------------------------------------------------
+
+    hardware_states = (
+        get_hardware_states(
+            coordinated_simulation
+        )
+    )
+
+    hardware.update_outputs(
+        coordinated_result,
+        hardware_states
+    )
+
+    # ----------------------------------------------------
+    # BUILD LIVE DASHBOARD STATE
+    # ----------------------------------------------------
+
+
+    live_state = build_live_state(
+        coordinated_result,
+        independent_dynamic_result,
+        independent_fixed_result,
+        hardware_states,
+    )
+
+    return live_state
+
+
+def cleanup_demonstrator():
 
     hardware.cleanup()
 
     print(
         "Hardware interface cleaned up."
     )
-
-if __name__ == "__main__":
-    run_demonstrator()

@@ -1,6 +1,14 @@
 import sys
+import time
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import (
+    QObject,
+    QThread,
+    Signal,
+    Slot,
+    Qt,
+)
+
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -13,6 +21,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from simulation import demonstrator_build
+
 
 
 # ============================================================
@@ -386,6 +397,62 @@ class ChartPlaceholder(QFrame):
 # MAIN WINDOW
 # ============================================================
 
+
+class DemonstratorWorker(QObject):
+
+    state_updated = Signal(dict)
+
+    finished = Signal()
+
+    error = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+
+        self.running = True
+
+
+    @Slot()
+    def run(self):
+
+        try:
+
+            while self.running:
+
+                state = (
+                    demonstrator_build
+                    .step_demonstrator()
+                )
+
+                self.state_updated.emit(
+                    state
+                )
+
+                time.sleep(
+                    demonstrator_build
+                    .playback_delay_seconds
+                )
+
+        except Exception as exc:
+
+            self.error.emit(
+                str(exc)
+            )
+
+        finally:
+
+            demonstrator_build.cleanup_demonstrator()
+
+            self.finished.emit()
+
+
+    def stop(self):
+
+        self.running = False
+
+
+        
+
 class VPPDashboard(QMainWindow):
 
     def __init__(self):
@@ -724,7 +791,70 @@ class VPPDashboard(QMainWindow):
         )
 
         self.apply_theme()
+        
+        self.start_demonstrator()
 
+
+    def closeEvent(
+        self,
+        event
+    ):
+    
+        if hasattr(
+            self,
+            "worker"
+        ):
+    
+            self.worker.stop()
+    
+        if hasattr(
+            self,
+            "worker_thread"
+        ):
+    
+            self.worker_thread.quit()
+    
+            self.worker_thread.wait(
+                3000
+            )
+    
+        event.accept()
+
+        
+    def start_demonstrator(
+        self
+    ):
+    
+        self.worker_thread = QThread(
+            self
+        )
+    
+        self.worker = (
+            DemonstratorWorker()
+        )
+    
+        self.worker.moveToThread(
+            self.worker_thread
+        )
+    
+        self.worker_thread.started.connect(
+            self.worker.run
+        )
+    
+        self.worker.state_updated.connect(
+            self.update_dashboard
+        )
+    
+        self.worker.error.connect(
+            self.handle_worker_error
+        )
+    
+        self.worker.finished.connect(
+            self.worker_thread.quit
+        )
+    
+        self.worker_thread.start()    
+        
 
     # ========================================================
     # THEME
@@ -823,6 +953,249 @@ class VPPDashboard(QMainWindow):
             """
         )
 
+
+    @Slot(dict)
+    def update_dashboard(
+        self,
+        state
+    ):
+    
+        simulation = state[
+            "simulation"
+        ]
+    
+        controls = state[
+            "controls"
+        ]
+    
+        vpp = state[
+            "vpp"
+        ]
+    
+        houses = state[
+            "houses"
+        ]
+
+        hour = simulation["hour"]
+    
+        hours = int(hour)
+    
+        minutes = int(
+            round(
+                (hour - hours) * 60
+            )
+        )
+    
+        self.time_label.setText(
+            f"DAY {simulation['day']}  •  "
+            f"{hours:02d}:{minutes:02d}"
+        )
+    
+        mode_text = (
+            simulation["mode"]
+            .replace("_", " ")
+            .upper()
+        )
+    
+        self.mode_badge.set_status(
+            mode_text,
+            BLUE
+        )
+    
+        if controls[
+            "vpp_event_active"
+        ]:
+    
+            self.event_badge.set_status(
+                "VPP EVENT ON",
+                ORANGE
+            )
+    
+        else:
+    
+            self.event_badge.set_status(
+                "VPP EVENT OFF",
+                TEXT_SECONDARY
+            )
+            
+        if controls[
+            "pv_sharing_enabled"
+        ]:
+    
+            self.sharing_badge.set_status(
+                "PV SHARING ON",
+                GREEN
+            )
+    
+        else:
+    
+            self.sharing_badge.set_status(
+                "PV SHARING OFF",
+                TEXT_SECONDARY
+            )
+    
+        if controls[
+            "economic_export_enabled"
+        ]:
+    
+            self.economic_badge.set_status(
+                "ECONOMIC EXPORT ON",
+                PURPLE
+            )
+    
+        else:
+    
+            self.economic_badge.set_status(
+                "ECONOMIC EXPORT OFF",
+                TEXT_SECONDARY
+            )
+
+        self.grid_import_card.set_value(
+            f"{vpp['grid_import_kw']:.2f}"
+        )
+    
+        self.grid_export_card.set_value(
+            f"{vpp['grid_export_kw']:.2f}"
+        )
+    
+        self.event_request_card.set_value(
+            f"{vpp['requested_event_kw']:.2f}"
+        )
+    
+        self.event_delivery_card.set_value(
+            f"{vpp['delivered_event_kw']:.2f}"
+        )
+    
+        self.battery_card.set_value(
+            f"{vpp['battery_soc_kwh']:.2f}"
+        )
+    
+        self.cost_card.set_value(
+            f"${vpp['net_cost']:.2f}"
+        )
+
+        for house_name, data in (
+            houses.items()
+        ):
+        
+            card = self.house_cards[
+                house_name
+            ]
+        
+            # ------------------------------------------------
+            # LOAD / PV
+            # ------------------------------------------------
+        
+            card.load_label.setText(
+                f"Load       "
+                f"{data['load_kw']:.2f} kW"
+            )
+        
+            card.pv_label.setText(
+                f"PV         "
+                f"{data['pv_kw']:.2f} kW"
+            )
+        
+            # ------------------------------------------------
+            # GRID EXCHANGE
+            # ------------------------------------------------
+        
+            if (
+                data["grid_export_kw"]
+                > 1e-6
+            ):
+        
+                grid_text = (
+                    f"Export     "
+                    f"{data['grid_export_kw']:.2f} kW"
+                )
+        
+            else:
+        
+                grid_text = (
+                    f"Import     "
+                    f"{data['grid_import_kw']:.2f} kW"
+                )
+        
+            card.grid_label.setText(
+                grid_text
+            )
+        
+            # ------------------------------------------------
+            # BATTERY POWER
+            # ------------------------------------------------
+        
+            battery_power_kw = (
+                data["battery_discharge_kw"]
+                - data["battery_charge_kw"]
+            )
+        
+            card.battery_label.setText(
+                f"Battery    "
+                f"{battery_power_kw:+.2f} kW"
+            )
+        
+            # ------------------------------------------------
+            # BATTERY SOC
+            # ------------------------------------------------
+        
+            card.soc_bar.setValue(
+                int(
+                    round(
+                        data[
+                            "battery_soc_percent"
+                        ]
+                    )
+                )
+            )
+        
+            # ------------------------------------------------
+            # VPP EVENT
+            # ------------------------------------------------
+        
+            card.event_label.setText(
+                f"Event: "
+                f"{data['vpp_event_export_kw']:.2f} / "
+                f"{data['vpp_event_target_kw']:.2f} kW"
+            )
+        
+            # ------------------------------------------------
+            # HOUSE OPERATING STATE
+            # ------------------------------------------------
+        
+            state_name = (
+                data["state"]
+                .replace("_", " ")
+                .upper()
+            )
+        
+            state_colours = {
+                "CHARGING": BLUE,
+                "DISCHARGING": ORANGE,
+                "FULL": GREEN,
+                "MINIMUM": RED,
+                "IDLE": TEXT_SECONDARY,
+                "NO BATTERY": TEXT_SECONDARY,
+            }
+        
+            card.state_label.set_status(
+                state_name,
+                state_colours.get(
+                    state_name,
+                    BLUE
+                )
+            )
+        
+    @Slot(str)
+    def handle_worker_error(
+        self,
+        message
+    ):
+    
+        print(
+            f"Demonstrator worker error: "
+            f"{message}"
+        )
 
 # ============================================================
 # APPLICATION ENTRY POINT
